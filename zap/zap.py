@@ -719,12 +719,18 @@ class zclass(object):
             logger.info('Choosing %s eigenspectra for all segments', nevals)
             nevals = np.zeros(nranges, dtype=int) + nevals
 
+        if nevals.ndim == 1:
+            start = np.zeros(nranges, dtype=int)
+            end = nevals
+        else:
+            start, end = nevals.T
+
         # take subset of the eigenspectra and put them in a list
         subespeceval = []
         for i in range(nranges):
             eigenspectra, evals = self.especeval[i]
-            tevals = (evals[0:nevals[i], :]).copy()
-            teigenspectra = (eigenspectra[:, 0:nevals[i]]).copy()
+            tevals = (evals[start[i]:end[i], :]).copy()
+            teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
             subespeceval.append((teigenspectra, tevals))
 
         self.subespeceval = subespeceval

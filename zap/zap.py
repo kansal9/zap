@@ -657,13 +657,16 @@ class zclass(object):
         logger.info('Calculating SVD')
 
         # normalize the variance in the segments
-        nseg = len(self.pranges)
-        self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
+        self.variancearray = np.std(self.stack, axis=1)
+        self.normstack /= self.variancearray[:, np.newaxis]
 
-        for i in range(nseg):
-            pmin, pmax = self.pranges[i]
-            var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
-            self.normstack[pmin:pmax, :] /= var[i, :]
+        nseg = len(self.pranges)
+        # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
+
+        # for i in range(nseg):
+        #     pmin, pmax = self.pranges[i]
+        #     var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
+        #     self.normstack[pmin:pmax, :] /= var[i, :]
 
         logger.debug('Beginning SVD on %d segments', nseg)
         indices = [x[0] for x in self.pranges[1:]]
@@ -743,14 +746,15 @@ class zclass(object):
         """
 
         logger.info('Reconstructing Sky Residuals')
-        nseg = len(self.especeval)
+        # nseg = len(self.especeval)
         rec = [(eig[:, :, np.newaxis] * ev[np.newaxis, :, :]).sum(axis=1)
                for eig, ev in self.subespeceval]
 
         # rescale to correct variance
-        for i in range(nseg):
-            rec[i] *= self.variancearray[i, :]
+        # for i in range(nseg):
+        #     rec[i] *= self.variancearray[i, :]
         self.recon = np.concatenate(rec)
+        self.recon *= self.variancearray[:, np.newaxis]
 
     # stuff the stack back into a cube
     def remold(self):
@@ -792,9 +796,11 @@ class zclass(object):
         nseg = len(self.especeval)
         self.nevals = np.zeros(nseg, dtype=int)
         indices = [x[0] for x in self.pranges[1:]]
+
+        varchunks = np.array_split(self.variancearray, indices)
         self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
                                     especeval=self.especeval,
-                                    variancearray=self.variancearray)
+                                    variancearray=varchunks)
 
         if self.optimizeType == 'enhanced':
             logger.info('Enhanced Optimization')
@@ -854,13 +860,16 @@ class zclass(object):
         nseg = len(self.pranges)
 
         # normalize the variance in the segments
-        self.variancearray = np.zeros((nseg, self.stack.shape[1]))
+        self.variancearray = np.std(self.stack, axis=1)
+        self.normstack /= self.variancearray[:, np.newaxis]
 
-        for i in range(nseg):
-            pmin, pmax = self.pranges[i]
-            self.variancearray[i, :] = np.var(self.normstack[pmin:pmax, :],
-                                              axis=0)
-            self.normstack[pmin:pmax, :] /= self.variancearray[i, :]
+        # self.variancearray = np.zeros((nseg, self.stack.shape[1]))
+
+        # for i in range(nseg):
+        #     pmin, pmax = self.pranges[i]
+        #     self.variancearray[i, :] = np.var(self.normstack[pmin:pmax, :],
+        #                                       axis=0)
+        #     self.normstack[pmin:pmax, :] /= self.variancearray[i, :]
 
         especeval = []
         for i in range(nseg):
@@ -1193,7 +1202,7 @@ def _ivarcurve(i, istack, especeval=None, variancearray=None):
         # broadcast evals on evects and sum
         iprecon += (eig[:, np.newaxis] * ev[np.newaxis, :])
 
-        icleanstack = istack - (iprecon * variance)
+        icleanstack = istack - (iprecon * variance[:, np.newaxis])
         # calculate the variance on the cleaned segment
         ivarlist.append(np.var(icleanstack))
 

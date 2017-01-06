@@ -257,6 +257,9 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     # remove the continuum level - this is multiprocessed to speed it up
     zobj._continuumfilter(cftype=cftype, cfwidth=cfwidth)
 
+    # normalize the variance in the segments.
+    zobj._normalize_variance()
+
     # do the multiprocessed SVD calculation
     zobj._msvd()
 
@@ -514,6 +517,9 @@ class zclass(object):
         # remove the continuum level - this is multiprocessed to speed it up
         self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
 
+        # normalize the variance in the segments.
+        self._normalize_variance()
+
         # do the multiprocessed SVD calculation
         if extSVD is None:
             self._msvd()
@@ -645,30 +651,25 @@ class zclass(object):
                                               weight=weight, cfwidth=cfwidth)
             self.normstack = self.stack - self.contarray
 
-    @timeit
-    def _msvd(self):
-        """ Multiprocessed singular value decomposition.
-
-        First the normstack is normalized per segment per spaxel by the
-        variance.  Takes the normalized, spectral segments and distributes them
-        to the individual svd methods.
-
-        """
-        logger.info('Calculating SVD')
-
-        # normalize the variance in the segments
+    def _normalize_variance(self):
+        """Normalize the variance in the segments."""
         self.variancearray = np.std(self.stack, axis=1)
         self.normstack /= self.variancearray[:, np.newaxis]
-
-        nseg = len(self.pranges)
         # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
-
         # for i in range(nseg):
         #     pmin, pmax = self.pranges[i]
         #     var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
         #     self.normstack[pmin:pmax, :] /= var[i, :]
 
-        logger.debug('Beginning SVD on %d segments', nseg)
+    @timeit
+    def _msvd(self):
+        """ Multiprocessed singular value decomposition.
+
+        Takes the normalized, spectral segments and distributes them
+        to the individual svd methods.
+
+        """
+        logger.info('Calculating SVD on %d segments', len(self.pranges))
         indices = [x[0] for x in self.pranges[1:]]
         self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
@@ -858,18 +859,6 @@ class zclass(object):
         logger.info('Calculating eigenvalues for input eigenspectra')
         hdu = fits.open(extSVD)
         nseg = len(self.pranges)
-
-        # normalize the variance in the segments
-        self.variancearray = np.std(self.stack, axis=1)
-        self.normstack /= self.variancearray[:, np.newaxis]
-
-        # self.variancearray = np.zeros((nseg, self.stack.shape[1]))
-
-        # for i in range(nseg):
-        #     pmin, pmax = self.pranges[i]
-        #     self.variancearray[i, :] = np.var(self.normstack[pmin:pmax, :],
-        #                                       axis=0)
-        #     self.normstack[pmin:pmax, :] /= self.variancearray[i, :]
 
         especeval = []
         for i in range(nseg):

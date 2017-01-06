@@ -171,9 +171,9 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
-                  clean=clean, zlevel=zlevel, cftype=cftype,
-                  cfwidth=cfwidthSVD, mask=mask)
+        zsvd = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
+                         clean=clean, zlevel=zlevel, cftype=cftype,
+                         cfwidth=cfwidthSVD, mask=mask)
         extSVD = svdoutputfits
 
     zobj = zclass(musecubefits)
@@ -264,7 +264,10 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     zobj._msvd()
 
     # write to file
-    zobj.writeSVD(svdoutputfits=svdoutputfits)
+    if svdoutputfits is not None:
+        zobj.writeSVD(svdoutputfits=svdoutputfits)
+
+    return zobj
 
 
 def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
@@ -574,8 +577,11 @@ class zclass(object):
 
     def _externalzlevel(self, extSVD):
         """Remove the zero level from the extSVD file."""
-        logger.info('Using external zlevel')
-        self.zlsky = fits.getdata(extSVD, 0)
+        logger.info('Using external zlevel from %s', extSVD)
+        if isinstance(extSVD, zclass):
+            self.zlsky = np.array(extSVD.zlsky, copy=True)
+        else:
+            self.zlsky = fits.getdata(extSVD, 0)
         self.stack -= self.zlsky[:, np.newaxis]
         self.run_zlevel = 'extSVD'
 
@@ -857,18 +863,20 @@ class zclass(object):
 
     def _externalSVD(self, extSVD):
         logger.info('Calculating eigenvalues for input eigenspectra')
-        hdu = fits.open(extSVD)
         nseg = len(self.pranges)
 
-        especeval = []
-        for i in range(nseg):
-            eigenspectra = hdu[i + 1].data
-            ns = self.normstack[self.pranges[i][0]:self.pranges[i][1]]
-            evals = np.transpose(np.transpose(ns).dot(eigenspectra))
-            especeval.append([eigenspectra, evals])
+        if isinstance(extSVD, zclass):
+            eigenspectra = [esp[0] for esp in extSVD.especeval]
+        else:
+            with fits.open(extSVD) as hdulist:
+                eigenspectra = [hdu.data for hdu in hdulist[1:]]
 
-        self.especeval = especeval
-        hdu.close()
+        self.especeval = especeval = []
+        for i in range(nseg):
+            pmin, pmax = self.pranges[i]
+            ns = self.normstack[pmin:pmax]
+            evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
+            especeval.append([eigenspectra[i], evals])
 
     def _applymask(self, mask):
         """Apply a mask to the input data to provide a cleaner basis set.

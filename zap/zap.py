@@ -35,6 +35,7 @@ from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from scipy import ndimage as ndi
 from scipy.stats import sigmaclip
+from sklearn.decomposition import PCA
 from time import time
 
 from .version import __version__
@@ -66,7 +67,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
             pevals=[], nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None):
+            interactive=False, ncpu=None, pca_class=PCA, weighted=False):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -171,12 +172,11 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        zsvd = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
-                         clean=clean, zlevel=zlevel, cftype=cftype,
-                         cfwidth=cfwidthSVD, mask=mask)
-        extSVD = svdoutputfits
+        extSVD = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
+                           clean=clean, zlevel=zlevel, cftype=cftype,
+                           cfwidth=cfwidthSVD, mask=mask)
 
-    zobj = zclass(musecubefits)
+    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               pevals=pevals, nevals=nevals, optimizeType=optimizeType,
               extSVD=extSVD)
@@ -197,7 +197,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None):
+              ncpu=None, pca_class=PCA, weighted=False):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -237,7 +237,7 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     if cftype == 'weight' and zlevel == 'none':
         raise ValueError('Weighted median requires a zlevel calculation')
 
-    zobj = zclass(musecubefits)
+    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted)
 
     # clean up the nan values
     if clean:
@@ -264,8 +264,8 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     zobj._msvd()
 
     # write to file
-    if svdoutputfits is not None:
-        zobj.writeSVD(svdoutputfits=svdoutputfits)
+    # if svdoutputfits is not None:
+    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
 
     return zobj
 
@@ -402,7 +402,7 @@ class zclass(object):
 
     """
 
-    def __init__(self, musecubefits):
+    def __init__(self, musecubefits, pca_class=PCA, weighted=False):
         """ Initialization of the zclass.
 
         Pulls the datacube into the class and trims it based on the known
@@ -413,6 +413,7 @@ class zclass(object):
         self.cube = hdu[1].data
         self.header = hdu[1].header
         self.musecubefits = musecubefits
+        self.weights = 1 / np.sqrt(hdu[2].data) if weighted else None
         hdu.close()
 
         # Workaround for floating points errors in wcs computation: if cunit is
@@ -474,8 +475,9 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
-        self.especeval = []
-        self.subespeceval = []
+        self.pca_class = pca_class
+        # self.especeval = []
+        # self.subespeceval = []
 
         # Reconstruction of sky features
         self.recon = None
@@ -527,7 +529,9 @@ class zclass(object):
         if extSVD is None:
             self._msvd()
         else:
-            self._externalSVD(extSVD)
+            # self._externalSVD(extSVD)
+            self.models = extSVD.models
+        self.components = [m.components_.copy() for m in self.models]
 
         # choose some fraction of eigenspectra or some finite number of
         # eigenspectra
@@ -659,6 +663,7 @@ class zclass(object):
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
+        logger.info('Normalizing variances')
         self.variancearray = np.std(self.stack, axis=1)
         self.normstack /= self.variancearray[:, np.newaxis]
         # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
@@ -677,7 +682,11 @@ class zclass(object):
         """
         logger.info('Calculating SVD on %d segments', len(self.pranges))
         indices = [x[0] for x in self.pranges[1:]]
-        self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
+        Xarr = np.array_split(self.normstack.T, indices, axis=1)
+        self.models = [
+            self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
+            for x in Xarr]
+        # self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
     def chooseevals(self, nevals=[], pevals=[]):
         """ Choose the number of eigenspectra/evals to use for reconstruction.
@@ -690,18 +699,18 @@ class zclass(object):
         or provide an array that defines neval or peval per segment.
 
         """
-        nranges = len(self.especeval)
+        nranges = len(self.pranges)
         nevals = np.atleast_1d(nevals)
-        pevals = np.atleast_1d(pevals)
-        nespec = np.array([self.especeval[i][0].shape[1]
-                           for i in range(nranges)])
+        # pevals = np.atleast_1d(pevals)
+        # nespec = np.array([self.especeval[i][0].shape[1]
+        #                    for i in range(nranges)])
 
-        # deal with no selection
-        if len(nevals) == 0 and len(pevals) == 0:
-            logger.info('Number of modes not selected')
-            nevals = np.array([1])
+        # # deal with no selection
+        # if len(nevals) == 0 and len(pevals) == 0:
+        #     logger.info('Number of modes not selected')
+        #     nevals = np.array([1])
 
-        # deal with an input list
+        # # deal with an input list
         if len(nevals) > 1:
             if len(nevals) != nranges:
                 nevals = np.array([nevals[0]])
@@ -710,22 +719,22 @@ class zclass(object):
             else:
                 logger.info('Choosing %s eigenspectra for segments', nevals)
 
-        if len(pevals) > 1:
-            if len(pevals) != nranges:
-                pevals = np.array([pevals[0]])
-                logger.info('Chosen eigenspectra array does not correspond to '
-                            'number of segments')
-            else:
-                logger.info('Choosing %s%% of eigenspectra for segments',
-                            pevals)
-                nevals = (pevals * nespec / 100.).round().astype(int)
+        # if len(pevals) > 1:
+        #     if len(pevals) != nranges:
+        #         pevals = np.array([pevals[0]])
+        #         logger.info('Chosen eigenspectra array does not correspond to '
+        #                     'number of segments')
+        #     else:
+        #         logger.info('Choosing %s%% of eigenspectra for segments',
+        #                     pevals)
+        #         nevals = (pevals * nespec / 100.).round().astype(int)
 
-        # deal with single value entries
-        if len(pevals) == 1:
-            logger.info('Choosing %s%% of eigenspectra for all segments',
-                        pevals)
-            nevals = (pevals * nespec / 100.).round().astype(int)
-        elif len(nevals) == 1:
+        # # deal with single value entries
+        # if len(pevals) == 1:
+        #     logger.info('Choosing %s%% of eigenspectra for all segments',
+        #                 pevals)
+        #     nevals = (pevals * nespec / 100.).round().astype(int)
+        if len(nevals) == 1:
             logger.info('Choosing %s eigenspectra for all segments', nevals)
             nevals = np.zeros(nranges, dtype=int) + nevals
 
@@ -735,16 +744,18 @@ class zclass(object):
         else:
             start, end = nevals.T
 
-        # take subset of the eigenspectra and put them in a list
-        subespeceval = []
-        for i in range(nranges):
-            eigenspectra, evals = self.especeval[i]
-            tevals = (evals[start[i]:end[i], :]).copy()
-            teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
-            subespeceval.append((teigenspectra, tevals))
+        # # take subset of the eigenspectra and put them in a list
+        # subespeceval = []
+        # for i in range(nranges):
+        #     eigenspectra, evals = self.especeval[i]
+        #     tevals = (evals[start[i]:end[i], :]).copy()
+        #     teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
+        #     subespeceval.append((teigenspectra, tevals))
 
-        self.subespeceval = subespeceval
+        # self.subespeceval = subespeceval
         self.nevals = nevals
+        for i, model in enumerate(self.models):
+                model.components_ = self.components[i][start[i]:end[i]]
 
     @timeit
     def reconstruct(self):
@@ -753,15 +764,26 @@ class zclass(object):
         """
 
         logger.info('Reconstructing Sky Residuals')
-        # nseg = len(self.especeval)
-        rec = [(eig[:, :, np.newaxis] * ev[np.newaxis, :, :]).sum(axis=1)
-               for eig, ev in self.subespeceval]
 
-        # rescale to correct variance
-        # for i in range(nseg):
-        #     rec[i] *= self.variancearray[i, :]
-        self.recon = np.concatenate(rec)
-        self.recon *= self.variancearray[:, np.newaxis]
+        indices = [x[0] for x in self.pranges[1:]]
+        normstack = self.stack - self.contarray
+        Xarr = np.array_split(normstack.T, indices, axis=1)
+        Xnew = [model.transform(x, weights=self.weights)
+                for model, x in zip(self.models, Xarr)]
+        Xinv = [model.inverse_transform(x)
+                for model, x in zip(self.models, Xnew)]
+        self.recon = np.concatenate([x.T for x in Xinv])
+        # self.recon *= self.variancearray[:, np.newaxis]
+
+        # # nseg = len(self.especeval)
+        # rec = [(eig[:, :, np.newaxis] * ev[np.newaxis, :, :]).sum(axis=1)
+        #        for eig, ev in self.subespeceval]
+
+        # # rescale to correct variance
+        # # for i in range(nseg):
+        # #     rec[i] *= self.variancearray[i, :]
+        # self.recon = np.concatenate(rec)
+        # self.recon *= self.variancearray[:, np.newaxis]
 
     # stuff the stack back into a cube
     def remold(self):
@@ -785,68 +807,83 @@ class zclass(object):
         self.reconstruct()
         self.remold()
 
+    # @timeit
+    # def optimize(self):
+    #     """ Function to optimize the number of components used to characterize
+    #     the residuals.
+
+    #     This function calculates the variance per segment with an increasing
+    #     number of eigenspectra/eigenvalues. It then deterimines the point at
+    #     which the second derivative of this variance curve reaches zero. When
+    #     this occurs, the linear reduction in variance is attributable to the
+    #     removal of astronomical features rather than emission line residuals.
+
+    #     """
+    #     logger.info('Optimizing')
+
+    #     normstack = self.stack - self.contarray
+    #     nseg = len(self.especeval)
+    #     self.nevals = np.zeros(nseg, dtype=int)
+    #     indices = [x[0] for x in self.pranges[1:]]
+
+    #     varchunks = np.array_split(self.variancearray, indices)
+    #     self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
+    #                                 especeval=self.especeval,
+    #                                 variancearray=varchunks)
+
+    #     if self.optimizeType == 'enhanced':
+    #         logger.info('Enhanced Optimization')
+    #     else:
+    #         logger.info('Normal Optimization')
+
+    #     for i in range(nseg):
+    #         # optimize
+    #         varlist = self.varlist[i]
+    #         deriv = varlist[1:] - varlist[:-1]
+    #         deriv2 = deriv[1:] - deriv[:-1]
+    #         noptpix = varlist.size
+
+    #         if self.optimizeType != 'enhanced':
+    #             # statistics on the derivatives
+    #             ind = int(.5 * (noptpix - 2))
+    #             mn1 = deriv[ind:].mean()
+    #             std1 = deriv[ind:].std() * 2
+    #             mn2 = deriv2[ind:].mean()
+    #             std2 = deriv2[ind:].std() * 2
+    #             # look for crossing points. When they get within 1 sigma of
+    #             # mean in settled region.
+    #             # pad by 1 for 1st deriv
+    #             cross1 = np.append([False], deriv >= (mn1 - std1))
+    #             # pad by 2 for 2nd
+    #             cross2 = np.append([False, False],
+    #                                np.abs(deriv2) <= (mn2 + std2))
+    #             cross = np.logical_or(cross1, cross2)
+    #         else:
+    #             # statistics on the derivatives
+    #             ind = int(.75 * (noptpix - 2))
+    #             mn1 = deriv[ind:].mean()
+    #             std1 = deriv[ind:].std()
+    #             mn2 = deriv2[ind:].mean()
+    #             std2 = deriv2[ind:].std()
+    #             # pad by 1 for 1st deriv
+    #             cross = np.append([False], deriv >= (mn1 - std1))
+
+    #         self.nevals[i] = np.where(cross)[0][0]
+
     @timeit
     def optimize(self):
-        """ Function to optimize the number of components used to characterize
-        the residuals.
-
-        This function calculates the variance per segment with an increasing
-        number of eigenspectra/eigenvalues. It then deterimines the point at
-        which the second derivative of this variance curve reaches zero. When
-        this occurs, the linear reduction in variance is attributable to the
-        removal of astronomical features rather than emission line residuals.
-
-        """
-        logger.info('Optimizing')
-
-        normstack = self.stack - self.contarray
-        nseg = len(self.especeval)
-        self.nevals = np.zeros(nseg, dtype=int)
-        indices = [x[0] for x in self.pranges[1:]]
-
-        varchunks = np.array_split(self.variancearray, indices)
-        self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
-                                    especeval=self.especeval,
-                                    variancearray=varchunks)
-
-        if self.optimizeType == 'enhanced':
-            logger.info('Enhanced Optimization')
-        else:
-            logger.info('Normal Optimization')
-
-        for i in range(nseg):
-            # optimize
-            varlist = self.varlist[i]
-            deriv = varlist[1:] - varlist[:-1]
-            deriv2 = deriv[1:] - deriv[:-1]
-            noptpix = varlist.size
-
-            if self.optimizeType != 'enhanced':
-                # statistics on the derivatives
-                ind = int(.5 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std() * 2
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std() * 2
-                # look for crossing points. When they get within 1 sigma of
-                # mean in settled region.
-                # pad by 1 for 1st deriv
-                cross1 = np.append([False], deriv >= (mn1 - std1))
-                # pad by 2 for 2nd
-                cross2 = np.append([False, False],
-                                   np.abs(deriv2) <= (mn2 + std2))
-                cross = np.logical_or(cross1, cross2)
-            else:
-                # statistics on the derivatives
-                ind = int(.75 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std()
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std()
-                # pad by 1 for 1st deriv
-                cross = np.append([False], deriv >= (mn1 - std1))
-
-            self.nevals[i] = np.where(cross)[0][0]
+        ncomp = []
+        for model in self.models:
+            var = model.explained_variance_
+            deriv = var[1:] - var[:-1]
+            mean = deriv[10:].mean()
+            std = deriv[10:].std()
+            # deriv2 = deriv[1:] - deriv[:-1]
+            # mean2 = deriv2[10:].mean()
+            # std2 = deriv2[10:].std()
+            cut = np.where(np.append([False], deriv > mean-2*std))[0][0]
+            ncomp.append(cut)
+        self.nevals = np.array(ncomp)
 
     # #########################################################################
     # #################################### Extra Functions ####################
@@ -861,22 +898,22 @@ class zclass(object):
         contcube[:, self.y, self.x] = self.contarray
         return contcube
 
-    def _externalSVD(self, extSVD):
-        logger.info('Calculating eigenvalues for input eigenspectra')
-        nseg = len(self.pranges)
+    # def _externalSVD(self, extSVD):
+    #     logger.info('Calculating eigenvalues for input eigenspectra')
+    #     nseg = len(self.pranges)
 
-        if isinstance(extSVD, zclass):
-            eigenspectra = [esp[0] for esp in extSVD.especeval]
-        else:
-            with fits.open(extSVD) as hdulist:
-                eigenspectra = [hdu.data for hdu in hdulist[1:]]
+    #     if isinstance(extSVD, zclass):
+    #         eigenspectra = [esp[0] for esp in extSVD.especeval]
+    #     else:
+    #         with fits.open(extSVD) as hdulist:
+    #             eigenspectra = [hdu.data for hdu in hdulist[1:]]
 
-        self.especeval = especeval = []
-        for i in range(nseg):
-            pmin, pmax = self.pranges[i]
-            ns = self.normstack[pmin:pmax]
-            evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
-            especeval.append([eigenspectra[i], evals])
+    #     self.especeval = especeval = []
+    #     for i in range(nseg):
+    #         pmin, pmax = self.pranges[i]
+    #         ns = self.normstack[pmin:pmax]
+    #         evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
+    #         especeval.append([eigenspectra[i], evals])
 
     def _applymask(self, mask):
         """Apply a mask to the input data to provide a cleaner basis set.
@@ -1011,6 +1048,28 @@ class zclass(object):
         ax1.set_title('Segment {0}, {1} - {2} Angstroms'.format(
             i, self.lranges[i][0], self.lranges[i][1]))
 
+    def plotvarcurves(self):
+        nseg = len(self.models)
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(nseg, 3, figsize=(12, 2*nseg))
+
+        for ax, model in zip(axes, self.models):
+            var = model.explained_variance_
+            deriv = var[1:] - var[:-1]
+            mean = deriv[10:].mean()
+            std = deriv[10:].std()
+            deriv2 = deriv[1:] - deriv[:-1]
+            # mean2 = deriv2[10:].mean()
+            # std2 = deriv2[10:].std()
+            cut = np.where(np.append([False], deriv > mean-2*std))[0][0]
+            ax[0].plot(var, lw=1)
+            ax[1].plot(deriv, lw=1)
+            ax[2].plot(deriv2, lw=1)
+            # ax[0].set_xlim((0, 50))
+            ax[1].set_xlim((0, 50))
+            ax[2].set_xlim((0, 50))
+            for a in ax:
+                a.vlines(cut, *a.get_ylim(), color='g')
 
 ###############################################################################
 ##################################### Helper Functions ########################

@@ -531,6 +531,7 @@ class zclass(object):
         else:
             # self._externalSVD(extSVD)
             self.models = extSVD.models
+
         self.components = [m.components_.copy() for m in self.models]
 
         # choose some fraction of eigenspectra or some finite number of
@@ -684,7 +685,8 @@ class zclass(object):
         indices = [x[0] for x in self.pranges[1:]]
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
         self.models = [
-            self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
+            # self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
+            self.pca_class().fit(x)
             for x in Xarr]
         # self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
@@ -768,7 +770,8 @@ class zclass(object):
         indices = [x[0] for x in self.pranges[1:]]
         normstack = self.stack - self.contarray
         Xarr = np.array_split(normstack.T, indices, axis=1)
-        Xnew = [model.transform(x, weights=self.weights)
+        # Xnew = [model.transform(x, weights=self.weights)
+        Xnew = [model.transform(x)
                 for model, x in zip(self.models, Xarr)]
         Xinv = [model.inverse_transform(x)
                 for model, x in zip(self.models, Xnew)]
@@ -807,83 +810,85 @@ class zclass(object):
         self.reconstruct()
         self.remold()
 
-    # @timeit
-    # def optimize(self):
-    #     """ Function to optimize the number of components used to characterize
-    #     the residuals.
-
-    #     This function calculates the variance per segment with an increasing
-    #     number of eigenspectra/eigenvalues. It then deterimines the point at
-    #     which the second derivative of this variance curve reaches zero. When
-    #     this occurs, the linear reduction in variance is attributable to the
-    #     removal of astronomical features rather than emission line residuals.
-
-    #     """
-    #     logger.info('Optimizing')
-
-    #     normstack = self.stack - self.contarray
-    #     nseg = len(self.especeval)
-    #     self.nevals = np.zeros(nseg, dtype=int)
-    #     indices = [x[0] for x in self.pranges[1:]]
-
-    #     varchunks = np.array_split(self.variancearray, indices)
-    #     self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
-    #                                 especeval=self.especeval,
-    #                                 variancearray=varchunks)
-
-    #     if self.optimizeType == 'enhanced':
-    #         logger.info('Enhanced Optimization')
-    #     else:
-    #         logger.info('Normal Optimization')
-
-    #     for i in range(nseg):
-    #         # optimize
-    #         varlist = self.varlist[i]
-    #         deriv = varlist[1:] - varlist[:-1]
-    #         deriv2 = deriv[1:] - deriv[:-1]
-    #         noptpix = varlist.size
-
-    #         if self.optimizeType != 'enhanced':
-    #             # statistics on the derivatives
-    #             ind = int(.5 * (noptpix - 2))
-    #             mn1 = deriv[ind:].mean()
-    #             std1 = deriv[ind:].std() * 2
-    #             mn2 = deriv2[ind:].mean()
-    #             std2 = deriv2[ind:].std() * 2
-    #             # look for crossing points. When they get within 1 sigma of
-    #             # mean in settled region.
-    #             # pad by 1 for 1st deriv
-    #             cross1 = np.append([False], deriv >= (mn1 - std1))
-    #             # pad by 2 for 2nd
-    #             cross2 = np.append([False, False],
-    #                                np.abs(deriv2) <= (mn2 + std2))
-    #             cross = np.logical_or(cross1, cross2)
-    #         else:
-    #             # statistics on the derivatives
-    #             ind = int(.75 * (noptpix - 2))
-    #             mn1 = deriv[ind:].mean()
-    #             std1 = deriv[ind:].std()
-    #             mn2 = deriv2[ind:].mean()
-    #             std2 = deriv2[ind:].std()
-    #             # pad by 1 for 1st deriv
-    #             cross = np.append([False], deriv >= (mn1 - std1))
-
-    #         self.nevals[i] = np.where(cross)[0][0]
-
     @timeit
     def optimize(self):
+        """ Function to optimize the number of components used to characterize
+        the residuals.
+
+        This function calculates the variance per segment with an increasing
+        number of eigenspectra/eigenvalues. It then deterimines the point at
+        which the second derivative of this variance curve reaches zero. When
+        this occurs, the linear reduction in variance is attributable to the
+        removal of astronomical features rather than emission line residuals.
+
+        """
+        # logger.info('Optimizing')
+        # normstack = self.stack - self.contarray
+        # nseg = len(self.especeval)
+        # self.nevals = np.zeros(nseg, dtype=int)
+        # indices = [x[0] for x in self.pranges[1:]]
+
+        # varchunks = np.array_split(self.variancearray, indices)
+        # self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
+        #                             especeval=self.especeval,
+        #                             variancearray=varchunks)
+
+        if self.optimizeType == 'enhanced':
+            logger.info('Enhanced Optimization')
+        else:
+            logger.info('Normal Optimization')
+
         ncomp = []
         for model in self.models:
             var = model.explained_variance_
             deriv = var[1:] - var[:-1]
-            mean = deriv[10:].mean()
-            std = deriv[10:].std()
-            # deriv2 = deriv[1:] - deriv[:-1]
-            # mean2 = deriv2[10:].mean()
-            # std2 = deriv2[10:].std()
-            cut = np.where(np.append([False], deriv > mean-2*std))[0][0]
-            ncomp.append(cut)
+            deriv2 = deriv[1:] - deriv[:-1]
+            noptpix = var.size
+
+            if self.optimizeType != 'enhanced':
+                # statistics on the derivatives
+                ind = int(.5 * (noptpix - 2))
+                mn1 = deriv[ind:].mean()
+                std1 = deriv[ind:].std() * 2
+                mn2 = deriv2[ind:].mean()
+                std2 = deriv2[ind:].std() * 2
+                # look for crossing points. When they get within 1 sigma of
+                # mean in settled region.
+                # pad by 1 for 1st deriv
+                cross1 = np.append([False], deriv >= (mn1 - std1))
+                # pad by 2 for 2nd
+                cross2 = np.append([False, False],
+                                   np.abs(deriv2) <= (mn2 + std2))
+                cross = np.logical_or(cross1, cross2)
+            else:
+                # statistics on the derivatives
+                ind = int(.75 * (noptpix - 2))
+                mn1 = deriv[ind:].mean()
+                std1 = deriv[ind:].std()
+                mn2 = deriv2[ind:].mean()
+                std2 = deriv2[ind:].std()
+                # pad by 1 for 1st deriv
+                cross = np.append([False], deriv >= (mn1 - std1))
+
+            ncomp.append(np.where(cross)[0][0])
+
         self.nevals = np.array(ncomp)
+
+
+    # @timeit
+    # def optimize(self):
+    #     ncomp = []
+    #     for model in self.models:
+    #         var = model.explained_variance_
+    #         deriv = var[1:] - var[:-1]
+    #         mean = deriv[10:].mean()
+    #         std = deriv[10:].std()
+    #         # deriv2 = deriv[1:] - deriv[:-1]
+    #         # mean2 = deriv2[10:].mean()
+    #         # std2 = deriv2[10:].std()
+    #         cut = np.where(np.append([False], deriv > mean-2*std))[0][0]
+    #         ncomp.append(cut)
+    #     self.nevals = np.array(ncomp)
 
     # #########################################################################
     # #################################### Extra Functions ####################
@@ -974,38 +979,35 @@ class zclass(object):
         hdu.close()
         logger.info('Cube file saved to %s', outcubefits)
 
-    def writeSVD(self, svdoutputfits='ZAP_SVD.fits'):
-        """Write the SVD to an individual fits file."""
+    # def writeSVD(self, svdoutputfits='ZAP_SVD.fits'):
+    #     """Write the SVD to an individual fits file."""
 
-        check_file_exists(svdoutputfits)
-        header = fits.Header()
-        header['ZAPvers'] = (__version__, 'ZAP version')
-        header['ZAPzlvl'] = (self.run_zlevel, 'ZAP zero level correction')
-        header['ZAPclean'] = (self.run_clean,
-                              'ZAP NaN cleaning performed for calculation')
-        header['ZAPcftyp'] = (self._cftype, 'ZAP continuum filter type')
-        header['ZAPcfwid'] = (self._cfwidth, 'ZAP continuum filter size')
-        header['ZAPmask'] = (self.maskfile, 'ZAP mask used to remove sources')
-        nseg = len(self.pranges)
-        header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
+    #     check_file_exists(svdoutputfits)
+    #     header = fits.Header()
+    #     header['ZAPvers'] = (__version__, 'ZAP version')
+    #     header['ZAPzlvl'] = (self.run_zlevel, 'ZAP zero level correction')
+    #     header['ZAPclean'] = (self.run_clean,
+    #                           'ZAP NaN cleaning performed for calculation')
+    #     header['ZAPcftyp'] = (self._cftype, 'ZAP continuum filter type')
+    #     header['ZAPcfwid'] = (self._cfwidth, 'ZAP continuum filter size')
+    #     header['ZAPmask'] = (self.maskfile, 'ZAP mask used to remove sources')
+    #     nseg = len(self.pranges)
+    #     header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
 
-        hdu = fits.HDUList([fits.PrimaryHDU(self.zlsky)])
-        for i in range(len(self.pranges)):
-            hdu.append(fits.ImageHDU(self.especeval[i][0]))
-        # write for later use
-        hdu.writeto(svdoutputfits)
-        logger.info('SVD file saved to %s', svdoutputfits)
+    #     hdu = fits.HDUList([fits.PrimaryHDU(self.zlsky)])
+    #     for i in range(len(self.pranges)):
+    #         hdu.append(fits.ImageHDU(self.especeval[i][0]))
+    #     # write for later use
+    #     hdu.writeto(svdoutputfits)
+    #     logger.info('SVD file saved to %s', svdoutputfits)
 
     def plotvarcurve(self, i=0, ax=None):
-        if len(self.varlist) == 0:
-            logger.warning('No varlist found. The optimize method must be '
-                           'run first.')
-            return
-
-        # optimize
-        deriv = (np.roll(self.varlist[i], -1) - self.varlist[i])[:-1]
-        deriv2 = (np.roll(deriv, -1) - deriv)[:-1]
-        noptpix = self.varlist[i].size
+        var = self.models[i].explained_variance_
+        deriv = var[1:] - var[:-1]
+        # mean = deriv[10:].mean()
+        # std = deriv[10:].std()
+        deriv2 = deriv[1:] - deriv[:-1]
+        noptpix = var.size
 
         if self.optimizeType == 'normal':
             # statistics on the derivatives
@@ -1025,9 +1027,9 @@ class zclass(object):
             fig, ax = plt.subplots(3, 1, figsize=[10, 15])
 
         ax1, ax2, ax3 = ax
-        ax1.plot(self.varlist[i], linewidth=3)
+        ax1.plot(var, linewidth=3)
         ax1.plot([self.nevals[i], self.nevals[i]],
-                 [min(self.varlist[i]), max(self.varlist[i])])
+                 [min(var), max(var)])
         ax1.set_ylabel('Variance')
 
         ax2.plot(np.arange(deriv.size), deriv)
@@ -1051,25 +1053,10 @@ class zclass(object):
     def plotvarcurves(self):
         nseg = len(self.models)
         import matplotlib.pyplot as plt
-        fig, axes = plt.subplots(nseg, 3, figsize=(12, 2*nseg))
-
-        for ax, model in zip(axes, self.models):
-            var = model.explained_variance_
-            deriv = var[1:] - var[:-1]
-            mean = deriv[10:].mean()
-            std = deriv[10:].std()
-            deriv2 = deriv[1:] - deriv[:-1]
-            # mean2 = deriv2[10:].mean()
-            # std2 = deriv2[10:].std()
-            cut = np.where(np.append([False], deriv > mean-2*std))[0][0]
-            ax[0].plot(var, lw=1)
-            ax[1].plot(deriv, lw=1)
-            ax[2].plot(deriv2, lw=1)
-            # ax[0].set_xlim((0, 50))
-            ax[1].set_xlim((0, 50))
-            ax[2].set_xlim((0, 50))
-            for a in ax:
-                a.vlines(cut, *a.get_ylim(), color='g')
+        fig, axes = plt.subplots(nseg, 3, figsize=(16, nseg*2),
+                                 tight_layout=True)
+        for i in range(nseg):
+            self.plotvarcurve(i=i, ax=axes[i])
 
 ###############################################################################
 ##################################### Helper Functions ########################
@@ -1209,60 +1196,60 @@ def wmedian(spec, wt, cfwidth=100):
 
 # ### SVD #####
 
-def _isvd(i, normstack):
-    """
-    Perform single value decomposition and Calculate PC amplitudes (projection)
-    outputs are eigenspectra operates on a 2D array.
+# def _isvd(i, normstack):
+#     """
+#     Perform single value decomposition and Calculate PC amplitudes (projection)
+#     outputs are eigenspectra operates on a 2D array.
 
-    eigenspectra = [nbins, naxes]
-    evals = [naxes, nobj]
-    data = [nbins, nobj]
-    """
+#     eigenspectra = [nbins, naxes]
+#     evals = [naxes, nobj]
+#     data = [nbins, nobj]
+#     """
 
-    inormstack = normstack.T
-    U, s, V = np.linalg.svd(inormstack, full_matrices=0)
-    eigenspectra = np.transpose(V)
-    evals = inormstack.dot(eigenspectra)
-    logger.info('Finished SVD Segment %d', i)
-    return [eigenspectra, evals.T]
+#     inormstack = normstack.T
+#     U, s, V = np.linalg.svd(inormstack, full_matrices=0)
+#     eigenspectra = np.transpose(V)
+#     evals = inormstack.dot(eigenspectra)
+#     logger.info('Finished SVD Segment %d', i)
+#     return [eigenspectra, evals.T]
 
 
 # ### OPTIMIZE #####
 
 
-def _ivarcurve(i, istack, especeval=None, variancearray=None):
-    """
-    Reconstruct the residuals from a given set of eigenspectra and eigenvalues.
+# def _ivarcurve(i, istack, especeval=None, variancearray=None):
+#     """
+#     Reconstruct the residuals from a given set of eigenspectra and eigenvalues.
 
-    this is a special version for caculating the variance curve. It adds the
-    contribution of a single mode to an existing reconstruction.
+#     this is a special version for caculating the variance curve. It adds the
+#     contribution of a single mode to an existing reconstruction.
 
-    """
+#     """
 
-    iprecon = np.zeros_like(istack)
-    eigenspectra, evals = especeval[i]
-    variance = variancearray[i]
-    ivarlist = []
-    totalnevals = int(np.round(evals.shape[0] * 0.25))
+#     iprecon = np.zeros_like(istack)
+#     eigenspectra, evals = especeval[i]
+#     variance = variancearray[i]
+#     ivarlist = []
+#     totalnevals = int(np.round(evals.shape[0] * 0.25))
 
-    progress_step = int(totalnevals * .2)
-    to_percent = 100. / (totalnevals - 1.)
-    info = logger.info
+#     progress_step = int(totalnevals * .2)
+#     to_percent = 100. / (totalnevals - 1.)
+#     info = logger.info
 
-    for nevals in range(totalnevals):
-        if nevals and (nevals % progress_step) == 0:
-            info('Seg %d: %d%% complete ', i, int(nevals * to_percent))
+#     for nevals in range(totalnevals):
+#         if nevals and (nevals % progress_step) == 0:
+#             info('Seg %d: %d%% complete ', i, int(nevals * to_percent))
 
-        eig = eigenspectra[:, nevals]
-        ev = evals[nevals, :]
-        # broadcast evals on evects and sum
-        iprecon += (eig[:, np.newaxis] * ev[np.newaxis, :])
+#         eig = eigenspectra[:, nevals]
+#         ev = evals[nevals, :]
+#         # broadcast evals on evects and sum
+#         iprecon += (eig[:, np.newaxis] * ev[np.newaxis, :])
 
-        icleanstack = istack - (iprecon * variance[:, np.newaxis])
-        # calculate the variance on the cleaned segment
-        ivarlist.append(np.var(icleanstack))
+#         icleanstack = istack - (iprecon * variance[:, np.newaxis])
+#         # calculate the variance on the cleaned segment
+#         ivarlist.append(np.var(icleanstack))
 
-    return np.array(ivarlist)
+#     return np.array(ivarlist)
 
 
 def _newheader(zobj):

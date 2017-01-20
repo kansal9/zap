@@ -627,6 +627,7 @@ class zclass(object):
         else:
             logger.info('Skipping zlevel subtraction')
 
+    @timeit
     def _continuumfilter(self, cfwidth=100, cftype='weight'):
         """ A multiprocessed implementation of the continuum removal.
 
@@ -642,36 +643,41 @@ class zclass(object):
 
         """
         logger.info('Applying Continuum Filter, cfwidth=%d', cfwidth)
-        if cftype not in ('weight', 'median', 'none'):
-            raise ValueError("cftype must be 'weight' or 'median', got {}"
-                             .format(cftype))
+        if cftype not in ('weight', 'median', 'fit', 'none'):
+            raise ValueError("cftype must be weight, median, fit or none, "
+                             "got {}".format(cftype))
         self._cftype = cftype
         self._cfwidth = cfwidth
 
-        if cftype == 'median':
-            weight = None
-        elif cftype == 'weight':
+        weight = None
+        if cftype == 'weight':
             weight = np.abs(self.zlsky - (np.max(self.zlsky) + 1))
 
         # remove continuum features
         if cftype == 'none':
             self.contarray = np.zeros_like(self.stack)
-            self.normstack = self.stack.copy()
+        elif cftype == 'fit':
+            x = np.arange(self.stack.shape[0])
+            res = np.polynomial.polynomial.polyfit(x, self.stack, deg=5)
+            ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
+            self.contarray = ret.T
         else:
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
-            self.normstack = self.stack - self.contarray
+        self.normstack = self.stack - self.contarray
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
         logger.info('Normalizing variances')
-        self.variancearray = np.std(self.stack, axis=1)
-        self.normstack /= self.variancearray[:, np.newaxis]
-        # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
-        # for i in range(nseg):
-        #     pmin, pmax = self.pranges[i]
-        #     var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
-        #     self.normstack[pmin:pmax, :] /= var[i, :]
+        # self.variancearray = np.std(self.stack, axis=1)
+        # self.normstack /= self.variancearray[:, np.newaxis]
+
+        nseg = len(self.pranges)
+        self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
+        for i in range(nseg):
+            pmin, pmax = self.pranges[i]
+            var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
+            self.normstack[pmin:pmax, :] /= var[i, :]
 
     @timeit
     def _msvd(self):
@@ -683,10 +689,11 @@ class zclass(object):
         """
         logger.info('Calculating SVD on %d segments', len(self.pranges))
         indices = [x[0] for x in self.pranges[1:]]
+        # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
         self.models = [
-            # self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
-            self.pca_class().fit(x)
+            self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
+            # self.pca_class().fit(x)
             for x in Xarr]
         # self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
@@ -768,14 +775,16 @@ class zclass(object):
         logger.info('Reconstructing Sky Residuals')
 
         indices = [x[0] for x in self.pranges[1:]]
-        normstack = self.stack - self.contarray
-        Xarr = np.array_split(normstack.T, indices, axis=1)
+        # normstack = self.stack - self.contarray
+        Xarr = np.array_split(self.normstack.T, indices, axis=1)
         # Xnew = [model.transform(x, weights=self.weights)
         Xnew = [model.transform(x)
                 for model, x in zip(self.models, Xarr)]
         Xinv = [model.inverse_transform(x)
                 for model, x in zip(self.models, Xnew)]
-        self.recon = np.concatenate([x.T for x in Xinv])
+        # self.recon = np.concatenate([x.T for x in Xinv])
+        self.recon = np.concatenate([x.T * self.variancearray[i, :]
+                                     for i, x in enumerate(Xinv)])
         # self.recon *= self.variancearray[:, np.newaxis]
 
         # # nseg = len(self.especeval)
@@ -1109,7 +1118,6 @@ def parallel_map(func, arr, indices, **kwargs):
 
 ##### Continuum Filtering #####
 
-@timeit
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
     if cftype == 'median':
         func = _icfmedian

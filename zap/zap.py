@@ -475,6 +475,7 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
+        logger.info('Using %s', pca_class)
         self.pca_class = pca_class
         # self.especeval = []
         # self.subespeceval = []
@@ -692,8 +693,9 @@ class zclass(object):
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
         self.models = [
-            self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
-            # self.pca_class().fit(x)
+            # self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
+            # self.pca_class(n_components='mle', svd_solver='full').fit(x)
+            self.pca_class().fit(x)
             for x in Xarr]
         # self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
@@ -842,25 +844,15 @@ class zclass(object):
         #                             especeval=self.especeval,
         #                             variancearray=varchunks)
 
-        if self.optimizeType == 'enhanced':
-            logger.info('Enhanced Optimization')
-        else:
-            logger.info('Normal Optimization')
+        logger.info('Compute number of components')
 
         ncomp = []
         for model in self.models:
             var = model.explained_variance_
-            deriv = var[1:] - var[:-1]
-            deriv2 = deriv[1:] - deriv[:-1]
-            noptpix = var.size
+            deriv, deriv2, mn1, std1, mn2, std2 = _compute_deriv(
+                var, mode=self.optimizeType)
 
             if self.optimizeType != 'enhanced':
-                # statistics on the derivatives
-                ind = int(.5 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std() * 2
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std() * 2
                 # look for crossing points. When they get within 1 sigma of
                 # mean in settled region.
                 # pad by 1 for 1st deriv
@@ -870,12 +862,6 @@ class zclass(object):
                                    np.abs(deriv2) <= (mn2 + std2))
                 cross = np.logical_or(cross1, cross2)
             else:
-                # statistics on the derivatives
-                ind = int(.75 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std()
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std()
                 # pad by 1 for 1st deriv
                 cross = np.append([False], deriv >= (mn1 - std1))
 
@@ -1012,24 +998,8 @@ class zclass(object):
 
     def plotvarcurve(self, i=0, ax=None):
         var = self.models[i].explained_variance_
-        deriv = var[1:] - var[:-1]
-        # mean = deriv[10:].mean()
-        # std = deriv[10:].std()
-        deriv2 = deriv[1:] - deriv[:-1]
-        noptpix = var.size
-
-        if self.optimizeType == 'normal':
-            # statistics on the derivatives
-            mn1 = deriv[.5 * (noptpix - 2):].mean()
-            std1 = deriv[.5 * (noptpix - 2):].std() * 2
-            mn2 = deriv2[.5 * (noptpix - 2):].mean()
-            std2 = deriv2[.5 * (noptpix - 2):].std() * 2
-        else:
-            # statistics on the derivatives
-            mn1 = deriv[.75 * (noptpix - 2):].mean()
-            std1 = deriv[.75 * (noptpix - 2):].std()
-            mn2 = deriv2[.75 * (noptpix - 2):].mean()
-            std2 = deriv2[.75 * (noptpix - 2):].std()
+        deriv, deriv2, mn1, std1, mn2, std2 = _compute_deriv(
+            var, mode=self.optimizeType)
 
         if ax is None:
             import matplotlib.pyplot as plt
@@ -1115,6 +1085,28 @@ def parallel_map(func, arr, indices, **kwargs):
 
     return results
 
+
+def _compute_deriv(arr, mode='normal'):
+    deriv = np.diff(arr)
+    deriv2 = np.diff(deriv)
+    noptpix = arr.size
+
+    if mode == 'normal':
+        # statistics on the derivatives
+        ind = int(.5 * (noptpix - 2))
+        mn1 = deriv[ind:].mean()
+        std1 = deriv[ind:].std() * 2
+        mn2 = deriv2[ind:].mean()
+        std2 = deriv2[ind:].std() * 2
+    else:
+        # statistics on the derivatives
+        ind = int(.75 * (noptpix - 2))
+        mn1 = deriv[ind:].mean()
+        std1 = deriv[ind:].std()
+        mn2 = deriv2[ind:].mean()
+        std2 = deriv2[ind:].std()
+
+    return deriv, deriv2, mn1, std1, mn2, std2
 
 ##### Continuum Filtering #####
 

@@ -157,10 +157,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    # Check for consistency between weighted median and zlevel keywords
-    if cftype == 'weight' and zlevel == 'none':
-        raise ValueError('Weighted median requires a zlevel calculation')
-
     if optimizeType not in ('none', 'normal', 'enhanced'):
         raise ValueError('Invalid value for optimizeType')
 
@@ -187,10 +183,10 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # Return the zobj object without saving files
         return zobj
 
-    if zobj.run_zlevel != 'extSVD' and svdoutputfits is not None:
-        # Save SVD only if it was computed in _run, i.e. if an external SVD
-        # was not given
-        zobj.writeSVD(svdoutputfits=svdoutputfits)
+    # if zobj.run_zlevel != 'extSVD' and svdoutputfits is not None:
+    #     # Save SVD only if it was computed in _run, i.e. if an external SVD
+    #     # was not given
+    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
     if skycubefits is not None:
         zobj.writeskycube(skycubefits=skycubefits)
 
@@ -235,33 +231,10 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    # Check for consistency between weighted median and zlevel keywords
-    if cftype == 'weight' and zlevel == 'none':
-        raise ValueError('Weighted median requires a zlevel calculation')
-
     zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
                   n_components=n_components)
-
-    # clean up the nan values
-    if clean:
-        zobj._nanclean()
-
-    # if mask is supplied, apply it
-    if mask is not None:
-        zobj._applymask(mask)
-
-    # Extract the spectra that we will be working with
-    zobj._extract()
-
-    # remove the median along the spectral axis
-    if zlevel.lower() != 'none':
-        zobj._zlevel(calctype=zlevel)
-
-    # remove the continuum level - this is multiprocessed to speed it up
-    zobj._continuumfilter(cftype=cftype, cfwidth=cfwidth)
-
-    # normalize the variance in the segments.
-    zobj._normalize_variance()
+    zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
+                  cfwidth=cfwidth, mask=mask)
 
     # do the multiprocessed SVD calculation
     zobj._msvd()
@@ -491,6 +464,39 @@ class zclass(object):
         self.varlist = None  # container for variance curves
 
     @timeit
+    def _prepare(self, clean=True, zlevel='median', cftype='weight',
+                 cfwidth=100, extzlevel=None, mask=None):
+        logger.info('Preprocessing data')
+
+        # Check for consistency between weighted median and zlevel keywords
+        if cftype == 'weight' and zlevel == 'none':
+            raise ValueError('Weighted median requires a zlevel calculation')
+
+        # clean up the nan values
+        if clean:
+            self._nanclean()
+
+        # if mask is supplied, apply it
+        if mask is not None:
+            self._applymask(mask)
+
+        # Extract the spectra that we will be working with
+        self._extract()
+
+        # remove the median along the spectral axis
+        if extzlevel is None:
+            if zlevel.lower() != 'none':
+                self._zlevel(calctype=zlevel)
+        else:
+            self._externalzlevel(extzlevel)
+
+        # remove the continuum level - this is multiprocessed to speed it up
+        self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
+
+        # normalize the variance in the segments.
+        self._normalize_variance()
+
+    @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
              cfwidth=100, pevals=[], nevals=[], optimizeType='normal',
              extSVD=None):
@@ -507,29 +513,8 @@ class zclass(object):
         - data cube reconstruction.
 
         """
-        logger.info('Running ZAP %s !', __version__)
-
-        self.optimizeType = optimizeType
-
-        # clean up the nan values
-        if clean:
-            self._nanclean()
-
-        # Extract the spectra that we will be working with
-        self._extract()
-
-        # remove the median along the spectral axis
-        if extSVD is None:
-            if zlevel.lower() != 'none':
-                self._zlevel(calctype=zlevel)
-        else:
-            self._externalzlevel(extSVD)
-
-        # remove the continuum level - this is multiprocessed to speed it up
-        self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
-
-        # normalize the variance in the segments.
-        self._normalize_variance()
+        self._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
+                      cfwidth=cfwidth, extzlevel=extSVD)
 
         # do the multiprocessed SVD calculation
         if extSVD is None:

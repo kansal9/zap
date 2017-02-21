@@ -67,7 +67,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
             pevals=[], nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None, pca_class=PCA, weighted=False):
+            interactive=False, ncpu=None, pca_class=PCA, weighted=False,
+            n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -176,7 +177,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
                            clean=clean, zlevel=zlevel, cftype=cftype,
                            cfwidth=cfwidthSVD, mask=mask)
 
-    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted)
+    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
+                  n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               pevals=pevals, nevals=nevals, optimizeType=optimizeType,
               extSVD=extSVD)
@@ -197,7 +199,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None, pca_class=PCA, weighted=False):
+              ncpu=None, pca_class=PCA, weighted=False, n_components=None):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -237,7 +239,8 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     if cftype == 'weight' and zlevel == 'none':
         raise ValueError('Weighted median requires a zlevel calculation')
 
-    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted)
+    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
+                  n_components=n_components)
 
     # clean up the nan values
     if clean:
@@ -402,7 +405,8 @@ class zclass(object):
 
     """
 
-    def __init__(self, musecubefits, pca_class=PCA, weighted=False):
+    def __init__(self, musecubefits, pca_class=PCA, weighted=False,
+                 n_components=None):
         """ Initialization of the zclass.
 
         Pulls the datacube into the class and trims it based on the known
@@ -481,6 +485,7 @@ class zclass(object):
         # self.subespeceval = []
 
         # Reconstruction of sky features
+        self.n_components = n_components
         self.recon = None
         self.cleancube = None
         self.varlist = None  # container for variance curves
@@ -643,7 +648,8 @@ class zclass(object):
             removed
 
         """
-        logger.info('Applying Continuum Filter, cfwidth=%d', cfwidth)
+        logger.info('Applying Continuum Filter, cftype=%s, cfwidth=%d',
+                    cftype, cfwidth)
         if cftype not in ('weight', 'median', 'fit', 'none'):
             raise ValueError("cftype must be weight, median, fit or none, "
                              "got {}".format(cftype))
@@ -692,11 +698,18 @@ class zclass(object):
         indices = [x[0] for x in self.pranges[1:]]
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
-        self.models = [
-            # self.pca_class(n_components=max(x.shape[1]//4, 60)).fit(x)
-            # self.pca_class(n_components='mle', svd_solver='full').fit(x)
-            self.pca_class().fit(x)
-            for x in Xarr]
+
+        self.models = []
+        for i, x in enumerate(Xarr):
+            if self.n_components is not None:
+                ncomp = max(x.shape[1]*self.n_components, 60)
+                logger.info('Segment %d, computing %d eigenvectors out of %d',
+                            i, ncomp, x.shape[1])
+            else:
+                ncomp = None
+
+            self.models.append(self.pca_class(n_components=ncomp).fit(x))
+
         # self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
     def chooseevals(self, nevals=[], pevals=[]):
@@ -849,21 +862,21 @@ class zclass(object):
         ncomp = []
         for model in self.models:
             var = model.explained_variance_
-            deriv, deriv2, mn1, std1, mn2, std2 = _compute_deriv(
-                var, mode=self.optimizeType)
+            deriv, mn1, std1 = _compute_deriv(var)
+            cross = np.append([False], deriv >= (mn1 - std1))
 
-            if self.optimizeType != 'enhanced':
-                # look for crossing points. When they get within 1 sigma of
-                # mean in settled region.
-                # pad by 1 for 1st deriv
-                cross1 = np.append([False], deriv >= (mn1 - std1))
-                # pad by 2 for 2nd
-                cross2 = np.append([False, False],
-                                   np.abs(deriv2) <= (mn2 + std2))
-                cross = np.logical_or(cross1, cross2)
-            else:
-                # pad by 1 for 1st deriv
-                cross = np.append([False], deriv >= (mn1 - std1))
+            # if self.optimizeType != 'enhanced':
+            #     # look for crossing points. When they get within 1 sigma of
+            #     # mean in settled region.
+            #     # pad by 1 for 1st deriv
+            #     cross1 = np.append([False], deriv >= (mn1 - std1))
+            #     # pad by 2 for 2nd
+            #     cross2 = np.append([False, False],
+            #                        np.abs(deriv2) <= (mn2 + std2))
+            #     cross = np.logical_or(cross1, cross2)
+            # else:
+            #     # pad by 1 for 1st deriv
+            #     cross = np.append([False], deriv >= (mn1 - std1))
 
             ncomp.append(np.where(cross)[0][0])
 
@@ -998,8 +1011,7 @@ class zclass(object):
 
     def plotvarcurve(self, i=0, ax=None):
         var = self.models[i].explained_variance_
-        deriv, deriv2, mn1, std1, mn2, std2 = _compute_deriv(
-            var, mode=self.optimizeType)
+        deriv, mn1, std1 = _compute_deriv(var)
 
         if ax is None:
             import matplotlib.pyplot as plt
@@ -1007,20 +1019,17 @@ class zclass(object):
 
         ax1, ax2, ax3 = ax
         ax1.plot(var, linewidth=3)
-        ax1.plot([self.nevals[i], self.nevals[i]],
-                 [min(var), max(var)])
+        ax1.plot([self.nevals[i], self.nevals[i]], [min(var), max(var)])
         ax1.set_ylabel('Variance')
 
         ax2.plot(np.arange(deriv.size), deriv)
-        ax2.plot([0, len(deriv)], [mn1, mn1], 'k')
-        ax2.plot([0, len(deriv)], [mn1 - std1, mn1 - std1], '0.5')
+        ax2.hlines([mn1, mn1-std1], 0, len(deriv), colors=('k', '0.5'))
         ax2.plot([self.nevals[i] - 1, self.nevals[i] - 1],
                  [min(deriv), max(deriv)])
         ax2.set_ylabel('d/dn Var')
 
+        deriv2 = np.diff(deriv)
         ax3.plot(np.arange(deriv2.size), np.abs(deriv2))
-        ax3.plot([0, len(deriv2)], [mn2, mn2], 'k')
-        ax3.plot([0, len(deriv2)], [mn2 + std2, mn2 + std2], '0.5')
         ax3.plot([self.nevals[i] - 2, self.nevals[i] - 2],
                  [min(deriv2), max(deriv2)])
         ax3.set_ylabel('(d^2/dn^2) Var')
@@ -1086,27 +1095,13 @@ def parallel_map(func, arr, indices, **kwargs):
     return results
 
 
-def _compute_deriv(arr, mode='normal'):
+def _compute_deriv(arr, nsigma=5):
+    """Compute statistics on the derivatives"""
     deriv = np.diff(arr)
-    deriv2 = np.diff(deriv)
-    noptpix = arr.size
-
-    if mode == 'normal':
-        # statistics on the derivatives
-        ind = int(.5 * (noptpix - 2))
-        mn1 = deriv[ind:].mean()
-        std1 = deriv[ind:].std() * 2
-        mn2 = deriv2[ind:].mean()
-        std2 = deriv2[ind:].std() * 2
-    else:
-        # statistics on the derivatives
-        ind = int(.75 * (noptpix - 2))
-        mn1 = deriv[ind:].mean()
-        std1 = deriv[ind:].std()
-        mn2 = deriv2[ind:].mean()
-        std2 = deriv2[ind:].std()
-
-    return deriv, deriv2, mn1, std1, mn2, std2
+    ind = int(.15 * arr.size)
+    mn1 = deriv[ind:].mean()
+    std1 = deriv[ind:].std() * nsigma
+    return deriv, mn1, std1
 
 ##### Continuum Filtering #####
 

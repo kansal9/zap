@@ -32,7 +32,7 @@ import sys
 
 from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel
 from astropy.io import fits
-from astropy.stats import gaussian_fwhm_to_sigma, mad_std
+from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.wcs import WCS
 from astropy.table import Table, TableGroups
 from functools import wraps
@@ -671,62 +671,77 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fwhm=1.0, nsigma=3):
+    def _linesfilter(self, outfile, fwhm=1.0, nsigma=4):
         logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fwhm,
                     nsigma)
         # Reconstruct a cube from the continuum filtered stack
         cube = self.cube.copy()
         cube[:, self.y, self.x] = self.normstack
         cube[self.nancube] = np.nan
+        shape = cube.shape
 
         # Mask edges by dilating the mask from the nan region
-        nanmask = np.sum(np.isnan(cube), axis=0) / cube.shape[0] > 0.25
+        nanmask = np.sum(np.isnan(cube), axis=0) / shape[0] > 0.25
         labels, nlabels = ndi.label(nanmask)
         maxlabel = np.argmax([np.sum(labels == l)
                               for l in range(1, nlabels+1)]) + 1
         mask = labels == maxlabel
         struct = ndi.generate_binary_structure(2, 2)
         mask = ndi.binary_dilation(mask, structure=struct)
+        cube[:, mask] = np.nan
 
-        cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
-        stddev = fwhm / (cdelt * 3600) * gaussian_fwhm_to_sigma
         if self.run_zlevel != 'median':
             logger.debug('Will subtract median (zlevel=%s)', self.run_zlevel)
-        res = parallel_map(_ilinesfilter, cube, NCPU, axis=0,
-                           stddev=stddev, nsigma=nsigma,
-                           subtract_med=self.run_zlevel != 'median')
-        mask = np.concatenate(res, axis=0)
+            med = np.nanmedian(cube, axis=(1, 2))
+            cube -= med[:, np.newaxis, np.newaxis]
 
-        # med = np.nanmedian(cube, axis=(1, 2))
-        # cube -= med[:, np.newaxis, np.newaxis]
+        cmask = np.isnan(cube)
+        cube[cmask] = 0.
+        fits.writeto('before-conv.fits', cube, overwrite=True)
 
-        # cmask = ma.masked_invalid(cube)
-        # cube[cmask.mask] = 0.
+        # Spectral convolution
+        logger.info('Running spectral convolution ...')
+        stddev = 5.0/1.25*gaussian_fwhm_to_sigma
+        res = parallel_map(_iconv_spectral, cube.reshape(shape[0], -1),
+                           NCPU, axis=1, stddev=stddev)
+        cube = np.concatenate(res, axis=1).reshape(shape)
 
-        # kernel = Gaussian2DKernel(stddev=fwhm/0.2*gaussian_fwhm_to_sigma)
-        # kernel.normalize()
-        # kernel = kernel.array[np.newaxis, ...]
+        # Spatial convolution
+        logger.info('Running spatial convolution ...')
+        cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
+        stddev = fwhm / (cdelt * 3600) * gaussian_fwhm_to_sigma
+        res = parallel_map(_iconv_spatial, cube, NCPU, axis=0, stddev=stddev)
+        cube = np.concatenate(res, axis=0)
+        fits.writeto('after-conv.fits', cube, overwrite=True)
 
-        # logger.debug('Doing the convolution')
-        # cube = fftconvolve(cube, kernel, mode='same')
+        struct = np.array([[[0, 1, 1, 1, 0],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [1, 1, 1, 1, 1],
+                            [0, 1, 1, 1, 0]]])
+        # struct = ndi.iterate_structure(
+        #     ndi.generate_binary_structure(3, 1), 2).astype(int)
+        cube = ndi.grey_opening(cube, structure=struct)
 
-        # struct = np.array([[[0, 1, 1, 1, 0],
-        #                     [1, 1, 1, 1, 1],
-        #                     [1, 1, 1, 1, 1],
-        #                     [1, 1, 1, 1, 1],
-        #                     [0, 1, 1, 1, 0]]])
-        # cube = ndi.grey_opening(cube, structure=struct)
-
-        # cmask.data[:] = cube
-        # std = mad_std(cmask.reshape(cube.shape[0], -1), axis=1)
-        # mask = cube > (nsigma*std)[:, np.newaxis, np.newaxis]
+        cube[cmask] = np.nan
+        std = nsigma * mad_std(cube, axis=(1, 2))
+        cube[cmask] = 0.
+        mask = cube > std[:, np.newaxis, np.newaxis]
+        mask[[0, -1]] = False
 
         labels, nlabels = zip(*[ndi.label(m) for m in mask])
         # clabels = np.asarray(labels)
+        print(nlabels)
 
+        # cube[:, self.y, self.x] = self.normstack
+        # cube[mask] = 0.
+        # self.normstack = cube[:, self.y, self.x]
+        self.normstack[mask[:, self.y, self.x]] = 0
+
+        cube = self.cube.copy()
         cube[:, self.y, self.x] = self.normstack
-        cube[mask] = 0.
-        self.normstack = cube[:, self.y, self.x]
+        cube[self.nancube] = np.nan
+        fits.writeto('after-mask.fits', cube, overwrite=True)
 
         stats = []
         for i, n in enumerate(nlabels):
@@ -1189,6 +1204,38 @@ def _compute_deriv(arr, nsigma=5):
     std1 = deriv[ind:].std() * nsigma
     return deriv, mn1, std1
 
+
+def median_absolute_deviation(a, axis=None):
+    """Calculate the median absolute deviation (MAD).
+
+    Copied from Astropy to allow use np.nanmedian which is much faster here.
+
+    """
+
+    a = np.asanyarray(a)
+    a_median = np.nanmedian(a, axis=axis)
+
+    # broadcast the median array before subtraction
+    if axis is not None:
+        if isinstance(axis, (tuple, list)):
+            for ax in sorted(axis):
+                a_median = np.expand_dims(a_median, axis=ax)
+        else:
+            a_median = np.expand_dims(a_median, axis=axis)
+
+    return np.nanmedian(np.abs(a - a_median), axis=axis)
+
+
+def mad_std(data, axis=None):
+    """Calculate a robust standard deviation using the MAD.
+
+    Copied from Astropy to allow use np.nanmedian which is much faster here.
+
+    """
+    # NOTE: 1. / scipy.stats.norm.ppf(0.75) = 1.482602218505602
+    return median_absolute_deviation(data, axis=axis) * 1.482602218505602
+
+
 ##### Continuum Filtering #####
 
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
@@ -1275,37 +1322,25 @@ def wmedian(spec, wt, cfwidth=100):
     return wmed
 
 
-def _ilinesfilter(i, cube, stddev=1., nsigma=5, subtract_med=True):
-    logger.debug('Running process %d with cube %s', i, cube.shape)
+def _iconv_spectral(i, cube, stddev=1.):
+    # logger.debug('Running spectral conv %d with cube %s', i, cube.shape)
+    b = Gaussian1DKernel(stddev=stddev)
+    b.normalize()
+    kernel = b.array[:, np.newaxis]
+    cube = fftconvolve(cube, kernel, mode='same')
+    return cube
 
-    if subtract_med:
-        med = np.nanmedian(cube, axis=(1, 2))
-        cube -= med[:, np.newaxis, np.newaxis]
 
-    cmask = ma.masked_invalid(cube, copy=False)
-    cube[cmask.mask] = 0.
-
+def _iconv_spatial(i, cube, stddev=1.):
+    # logger.debug('Running spatial conv %d with cube %s', i, cube.shape)
     a = Gaussian2DKernel(stddev=stddev)
     a.normalize()
-    # kernel = a.array[np.newaxis, ...]
-    b = Gaussian1DKernel(stddev=5.0/1.25*gaussian_fwhm_to_sigma)
-    b.normalize()
-    kernel = a.array[np.newaxis, ...] * b.array[:, np.newaxis, np.newaxis]
+    kernel = a.array[np.newaxis, ...]
+    # b = Gaussian1DKernel(stddev=5.0/1.25*gaussian_fwhm_to_sigma)
+    # b.normalize()
+    # kernel = a.array[np.newaxis, ...] * b.array[:, np.newaxis, np.newaxis]
     cube = fftconvolve(cube, kernel, mode='same')
-
-    struct = np.array([[[0, 1, 1, 1, 0],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [1, 1, 1, 1, 1],
-                        [0, 1, 1, 1, 0]]])
-    # struct = ndi.iterate_structure(
-    #     ndi.generate_binary_structure(3, 1), 2).astype(int)
-    cube = ndi.grey_opening(cube, structure=struct)
-
-    cmask.data[:] = cube
-    std = mad_std(cmask.reshape(cube.shape[0], -1), axis=1)
-    mask = cube > (nsigma*std.filled(np.inf))[:, np.newaxis, np.newaxis]
-    return mask
+    return cube
 
 
 # ### SVD #####

@@ -27,13 +27,18 @@ import astropy.units as u
 import logging
 import numpy as np
 import os
+import scipy.ndimage as ndi
 import sys
 
+from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel
 from astropy.io import fits
+from astropy.stats import gaussian_fwhm_to_sigma, mad_std
 from astropy.wcs import WCS
+from astropy.table import Table, TableGroups
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
-from scipy import ndimage as ndi
+from numpy import ma
+from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
 from time import time
@@ -68,7 +73,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             pevals=[], nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
             interactive=False, ncpu=None, pca_class=PCA, weighted=False,
-            n_components=None):
+            n_components=None, filter_lines=False):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -171,13 +176,14 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # twice the zlevel and continuumfilter steps.
         extSVD = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
                            clean=clean, zlevel=zlevel, cftype=cftype,
-                           cfwidth=cfwidthSVD, mask=mask)
+                           cfwidth=cfwidthSVD, mask=mask,
+                           filter_lines=filter_lines)
 
     zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
                   n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               pevals=pevals, nevals=nevals, optimizeType=optimizeType,
-              extSVD=extSVD)
+              extSVD=extSVD, filter_lines=filter_lines)
 
     if interactive:
         # Return the zobj object without saving files
@@ -195,7 +201,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None, pca_class=PCA, weighted=False, n_components=None):
+              ncpu=None, pca_class=PCA, weighted=False, n_components=None,
+              filter_lines=False):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -234,7 +241,7 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
                   n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
-                  cfwidth=cfwidth, mask=mask)
+                  cfwidth=cfwidth, mask=mask, filter_lines=filter_lines)
 
     # do the multiprocessed SVD calculation
     zobj._msvd()
@@ -465,7 +472,7 @@ class zclass(object):
 
     @timeit
     def _prepare(self, clean=True, zlevel='median', cftype='weight',
-                 cfwidth=100, extzlevel=None, mask=None):
+                 cfwidth=100, extzlevel=None, mask=None, filter_lines=False):
         logger.info('Preprocessing data')
 
         # Check for consistency between weighted median and zlevel keywords
@@ -493,13 +500,16 @@ class zclass(object):
         # remove the continuum level - this is multiprocessed to speed it up
         self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
 
+        if filter_lines:
+            self._linesfilter(filter_lines)
+
         # normalize the variance in the segments.
         self._normalize_variance()
 
     @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
              cfwidth=100, pevals=[], nevals=[], optimizeType='normal',
-             extSVD=None):
+             extSVD=None, filter_lines=False):
         """ Perform all zclass to ZAP a datacube:
 
         - NaN re/masking,
@@ -514,7 +524,8 @@ class zclass(object):
 
         """
         self._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
-                      cfwidth=cfwidth, extzlevel=extSVD)
+                      cfwidth=cfwidth, extzlevel=extSVD,
+                      filter_lines=filter_lines)
 
         # do the multiprocessed SVD calculation
         if extSVD is None:
@@ -576,10 +587,11 @@ class zclass(object):
         logger.info('Using external zlevel from %s', extSVD)
         if isinstance(extSVD, zclass):
             self.zlsky = np.array(extSVD.zlsky, copy=True)
+            self.run_zlevel = extSVD.run_zlevel
         else:
             self.zlsky = fits.getdata(extSVD, 0)
+            self.run_zlevel = 'extSVD'
         self.stack -= self.zlsky[:, np.newaxis]
-        self.run_zlevel = 'extSVD'
 
     @timeit
     def _zlevel(self, calctype='median'):
@@ -657,6 +669,92 @@ class zclass(object):
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
         self.normstack = self.stack - self.contarray
+
+    @timeit
+    def _linesfilter(self, outfile, fwhm=1.0, nsigma=3):
+        logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fwhm,
+                    nsigma)
+        # Reconstruct a cube from the continuum filtered stack
+        cube = self.cube.copy()
+        cube[:, self.y, self.x] = self.normstack
+        cube[self.nancube] = np.nan
+
+        # Mask edges by dilating the mask from the nan region
+        nanmask = np.sum(np.isnan(cube), axis=0) / cube.shape[0] > 0.25
+        labels, nlabels = ndi.label(nanmask)
+        maxlabel = np.argmax([np.sum(labels == l)
+                              for l in range(1, nlabels+1)]) + 1
+        mask = labels == maxlabel
+        struct = ndi.generate_binary_structure(2, 2)
+        mask = ndi.binary_dilation(mask, structure=struct)
+
+        cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
+        stddev = fwhm / (cdelt * 3600) * gaussian_fwhm_to_sigma
+        if self.run_zlevel != 'median':
+            logger.debug('Will subtract median (zlevel=%s)', self.run_zlevel)
+        res = parallel_map(_ilinesfilter, cube, NCPU, axis=0,
+                           stddev=stddev, nsigma=nsigma,
+                           subtract_med=self.run_zlevel != 'median')
+        mask = np.concatenate(res, axis=0)
+
+        # med = np.nanmedian(cube, axis=(1, 2))
+        # cube -= med[:, np.newaxis, np.newaxis]
+
+        # cmask = ma.masked_invalid(cube)
+        # cube[cmask.mask] = 0.
+
+        # kernel = Gaussian2DKernel(stddev=fwhm/0.2*gaussian_fwhm_to_sigma)
+        # kernel.normalize()
+        # kernel = kernel.array[np.newaxis, ...]
+
+        # logger.debug('Doing the convolution')
+        # cube = fftconvolve(cube, kernel, mode='same')
+
+        # struct = np.array([[[0, 1, 1, 1, 0],
+        #                     [1, 1, 1, 1, 1],
+        #                     [1, 1, 1, 1, 1],
+        #                     [1, 1, 1, 1, 1],
+        #                     [0, 1, 1, 1, 0]]])
+        # cube = ndi.grey_opening(cube, structure=struct)
+
+        # cmask.data[:] = cube
+        # std = mad_std(cmask.reshape(cube.shape[0], -1), axis=1)
+        # mask = cube > (nsigma*std)[:, np.newaxis, np.newaxis]
+
+        labels, nlabels = zip(*[ndi.label(m) for m in mask])
+        # clabels = np.asarray(labels)
+
+        cube[:, self.y, self.x] = self.normstack
+        cube[mask] = 0.
+        self.normstack = cube[:, self.y, self.x]
+
+        stats = []
+        for i, n in enumerate(nlabels):
+            areas = np.array([np.sum(labels[i] == l) for l in range(1, n+1)])
+            if areas.size > 0:
+                stats.append([f(areas) for f in (np.min, np.max, np.median)])
+            else:
+                stats.append([-1, -1, -1])
+
+        min_, max_, median = zip(*stats)
+        masked_area = np.sum(mask, axis=(1, 2))
+
+        stats = Table(data=[nlabels, masked_area, min_, max_,
+                            np.array(median, dtype=int)],
+                      names=['nblobs', 'masked_area', 'min_area', 'max_area',
+                             'median_area'])
+        summary = TableGroups(stats).aggregate(np.median)
+        logger.info('Done, masked %d blobs. Summary for all wavelength',
+                    sum(nlabels))
+        for line in summary.pformat():
+            logger.info(line)
+
+        with fits.open(self.musecubefits) as hdul:
+            hdul[1].data = mask.astype(np.uint8)
+            del hdul[2]
+            hdul.append(fits.table_to_hdu(stats))
+            hdul.writeto(outfile, clobber=True)
+            logger.info('Labels file saved to %s', outfile)
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
@@ -1050,11 +1148,14 @@ def worker(f, i, chunk, out_q, err_q, kwargs):
 def parallel_map(func, arr, indices, **kwargs):
     logger.debug('Running function %s with indices: %s',
                  func.__name__, indices)
+    axis = kwargs.pop('axis', None)
+    if isinstance(indices, (int, np.integer)) and indices == 1:
+        return [func(0, arr, **kwargs)]
+
     manager = Manager()
     out_q = manager.Queue()
     err_q = manager.Queue()
     jobs = []
-    axis = kwargs.pop('axis', None)
     chunks = np.array_split(arr, indices, axis=axis)
 
     for i, chunk in enumerate(chunks):
@@ -1172,6 +1273,39 @@ def wmedian(spec, wt, cfwidth=100):
     np.seterr(old_settings['divide'])
 
     return wmed
+
+
+def _ilinesfilter(i, cube, stddev=1., nsigma=5, subtract_med=True):
+    logger.debug('Running process %d with cube %s', i, cube.shape)
+
+    if subtract_med:
+        med = np.nanmedian(cube, axis=(1, 2))
+        cube -= med[:, np.newaxis, np.newaxis]
+
+    cmask = ma.masked_invalid(cube, copy=False)
+    cube[cmask.mask] = 0.
+
+    a = Gaussian2DKernel(stddev=stddev)
+    a.normalize()
+    # kernel = a.array[np.newaxis, ...]
+    b = Gaussian1DKernel(stddev=5.0/1.25*gaussian_fwhm_to_sigma)
+    b.normalize()
+    kernel = a.array[np.newaxis, ...] * b.array[:, np.newaxis, np.newaxis]
+    cube = fftconvolve(cube, kernel, mode='same')
+
+    struct = np.array([[[0, 1, 1, 1, 0],
+                        [1, 1, 1, 1, 1],
+                        [1, 1, 1, 1, 1],
+                        [1, 1, 1, 1, 1],
+                        [0, 1, 1, 1, 0]]])
+    # struct = ndi.iterate_structure(
+    #     ndi.generate_binary_structure(3, 1), 2).astype(int)
+    cube = ndi.grey_opening(cube, structure=struct)
+
+    cmask.data[:] = cube
+    std = mad_std(cmask.reshape(cube.shape[0], -1), axis=1)
+    mask = cube > (nsigma*std.filled(np.inf))[:, np.newaxis, np.newaxis]
+    return mask
 
 
 # ### SVD #####
@@ -1314,6 +1448,6 @@ def _nanclean(cube, rejectratio=0.25, boxsz=1):
                 neighbor[outsider, icounter] = np.nan
                 icounter = icounter + 1
 
-    mn = np.ma.masked_invalid(neighbor)
+    mn = ma.masked_invalid(neighbor)
     cleancube[z, y, x] = mn.mean(axis=1).filled(np.nan)
     return cleancube, badcube

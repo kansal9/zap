@@ -34,7 +34,7 @@ from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel
 from astropy.io import fits
 from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.wcs import WCS
-from astropy.table import Table, TableGroups
+from astropy.table import Table
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from numpy import ma
@@ -689,6 +689,7 @@ class zclass(object):
         struct = ndi.generate_binary_structure(2, 2)
         mask = ndi.binary_dilation(mask, structure=struct)
         cube[:, mask] = np.nan
+        stdref = mad_std(cube, axis=(1, 2))
 
         if self.run_zlevel != 'median':
             logger.debug('Will subtract median (zlevel=%s)', self.run_zlevel)
@@ -730,13 +731,18 @@ class zclass(object):
         mask[[0, -1]] = False
 
         labels, nlabels = zip(*[ndi.label(m) for m in mask])
-        # clabels = np.asarray(labels)
-        print(nlabels)
+
+        sel = mask[:, self.y, self.x]
+        nmask = sel.sum(axis=1)
+        rand_values = np.random.randn(shape[0], nmask.max())
+        rand_values *= stdref[:, np.newaxis]
+
+        for i in np.where(nmask)[0]:
+            self.normstack[i, sel[i]] = rand_values[i][:nmask[i]]
 
         # cube[:, self.y, self.x] = self.normstack
         # cube[mask] = 0.
         # self.normstack = cube[:, self.y, self.x]
-        self.normstack[mask[:, self.y, self.x]] = 0
 
         cube = self.cube.copy()
         cube[:, self.y, self.x] = self.normstack
@@ -758,10 +764,8 @@ class zclass(object):
                             np.array(median, dtype=int)],
                       names=['nblobs', 'masked_area', 'min_area', 'max_area',
                              'median_area'])
-        summary = TableGroups(stats).aggregate(np.median)
-        logger.info('Done, masked %d blobs. Summary for all wavelength',
-                    sum(nlabels))
-        for line in summary.pformat():
+        logger.info('Done, masked %d blobs. Summary:', sum(nlabels))
+        for line in stats.info('stats', out=None).pformat():
             logger.info(line)
 
         with fits.open(self.musecubefits) as hdul:

@@ -671,7 +671,7 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fwhm=1.0, nsigma=4):
+    def _linesfilter(self, outfile, fwhm=1.0, nsigma=3, max_area=100):
         logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fwhm,
                     nsigma)
         # Reconstruct a cube from the continuum filtered stack
@@ -715,6 +715,7 @@ class zclass(object):
         cube = np.concatenate(res, axis=0)
         fits.writeto('after-conv.fits', cube, overwrite=True)
 
+        logger.info('Running morphological opening ...')
         struct = np.array([[[0, 1, 1, 1, 0],
                             [1, 1, 1, 1, 1],
                             [1, 1, 1, 1, 1],
@@ -728,10 +729,30 @@ class zclass(object):
         std = nsigma * mad_std(cube, axis=(1, 2))
         cube[cmask] = 0.
         mask = cube > std[:, np.newaxis, np.newaxis]
-        mask[[0, -1]] = False
+        # mask[[0, -1]] = False
 
+        logger.info('Filtering blobs ...')
+        fits.writeto('before-filter.fits', mask.astype(np.uint8),
+                     overwrite=True)
         labels, nlabels = zip(*[ndi.label(m) for m in mask])
+        stats = []
+        for im, n in zip(labels, nlabels):
+            areas = []
+            for label in range(1, n+1):
+                m = im == label
+                area = np.sum(m)
+                if area < max_area:
+                    areas.append(area)
+                else:
+                    im[m] = 0
 
+            if len(areas) > 0:
+                areas = np.array(areas)
+                stats.append([f(areas) for f in (np.min, np.max, np.median)])
+            else:
+                stats.append([-1, -1, -1])
+
+        mask = np.array(labels) > 0
         sel = mask[:, self.y, self.x]
         nmask = sel.sum(axis=1)
         rand_values = np.random.randn(shape[0], nmask.max())
@@ -748,14 +769,6 @@ class zclass(object):
         cube[:, self.y, self.x] = self.normstack
         cube[self.nancube] = np.nan
         fits.writeto('after-mask.fits', cube, overwrite=True)
-
-        stats = []
-        for i, n in enumerate(nlabels):
-            areas = np.array([np.sum(labels[i] == l) for l in range(1, n+1)])
-            if areas.size > 0:
-                stats.append([f(areas) for f in (np.min, np.max, np.median)])
-            else:
-                stats.append([-1, -1, -1])
 
         min_, max_, median = zip(*stats)
         masked_area = np.sum(mask, axis=(1, 2))

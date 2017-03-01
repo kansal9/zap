@@ -38,6 +38,7 @@ from astropy.table import Table
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from numpy import ma
+from scipy.ndimage import binary_dilation, grey_opening
 from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
@@ -671,13 +672,11 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fwhm=1.0, nsigma=3, max_area=100):
+    def _linesfilter(self, outfile, fwhm=1.0, nsigma=5, max_area=500):
         logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fwhm,
                     nsigma)
         # Reconstruct a cube from the continuum filtered stack
-        cube = self.cube.copy()
-        cube[:, self.y, self.x] = self.normstack
-        cube[self.nancube] = np.nan
+        cube = self.make_cube_from_stack(self.normstack, with_nans=True)
         shape = cube.shape
 
         # Mask edges by dilating the mask from the nan region
@@ -685,20 +684,16 @@ class zclass(object):
         labels, nlabels = ndi.label(nanmask)
         maxlabel = np.argmax([np.sum(labels == l)
                               for l in range(1, nlabels+1)]) + 1
-        mask = labels == maxlabel
-        struct = ndi.generate_binary_structure(2, 2)
-        mask = ndi.binary_dilation(mask, structure=struct)
+        struct_sq = np.ones((3, 3), dtype=bool)
+        mask = binary_dilation(labels == maxlabel, structure=struct_sq)
         cube[:, mask] = np.nan
-        stdref = mad_std(cube, axis=(1, 2))
+        # stdref = mad_std(cube, axis=(1, 2))
 
-        if self.run_zlevel != 'median':
-            logger.debug('Will subtract median (zlevel=%s)', self.run_zlevel)
-            med = np.nanmedian(cube, axis=(1, 2))
-            cube -= med[:, np.newaxis, np.newaxis]
+        med = np.nanmedian(cube, axis=(1, 2))
+        cube -= med[:, np.newaxis, np.newaxis]
 
         cmask = np.isnan(cube)
         cube[cmask] = 0.
-        fits.writeto('before-conv.fits', cube, overwrite=True)
 
         # Spectral convolution
         logger.info('Running spectral convolution ...')
@@ -713,17 +708,18 @@ class zclass(object):
         stddev = fwhm / (cdelt * 3600) * gaussian_fwhm_to_sigma
         res = parallel_map(_iconv_spatial, cube, NCPU, axis=0, stddev=stddev)
         cube = np.concatenate(res, axis=0)
-        fits.writeto('after-conv.fits', cube, overwrite=True)
+        fits.writeto('after-conv.fits', cube, header=self.header,
+                     overwrite=True)
 
         logger.info('Running morphological opening ...')
-        struct = np.array([[[0, 1, 1, 1, 0],
-                            [1, 1, 1, 1, 1],
-                            [1, 1, 1, 1, 1],
-                            [1, 1, 1, 1, 1],
-                            [0, 1, 1, 1, 0]]])
+        circ = np.array([[0, 1, 1, 1, 0],
+                         [1, 1, 1, 1, 1],
+                         [1, 1, 1, 1, 1],
+                         [1, 1, 1, 1, 1],
+                         [0, 1, 1, 1, 0]])
         # struct = ndi.iterate_structure(
         #     ndi.generate_binary_structure(3, 1), 2).astype(int)
-        cube = ndi.grey_opening(cube, structure=struct)
+        cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
 
         cube[cmask] = np.nan
         std = nsigma * mad_std(cube, axis=(1, 2))
@@ -731,49 +727,61 @@ class zclass(object):
         mask = cube > std[:, np.newaxis, np.newaxis]
         # mask[[0, -1]] = False
 
-        logger.info('Filtering blobs ...')
+        logger.info('Dilating mask ...')
+        # struct = np.array([1, 1, 1])[:, np.newaxis, np.newaxis]
+        struct = np.ones((5, 1, 1))
+        mask = binary_dilation(mask, structure=struct, iterations=1)
         fits.writeto('before-filter.fits', mask.astype(np.uint8),
-                     overwrite=True)
-        labels, nlabels = zip(*[ndi.label(m) for m in mask])
+                     header=self.header, overwrite=True)
+
+        logger.info('Filtering and filling blobs ...')
+        cube = self.make_cube_from_stack(self.normstack)
         stats = []
-        for im, n in zip(labels, nlabels):
+        for maskim, im in zip(mask, cube):
+            labels, nl = ndi.label(maskim)
             areas = []
-            for label in range(1, n+1):
-                m = im == label
+            for label in range(1, nl+1):
+                m = labels == label
                 area = np.sum(m)
-                if area < max_area:
-                    areas.append(area)
+                if area > max_area:
+                    maskim[m] = 0
                 else:
-                    im[m] = 0
+                    areas.append(area)
+                    mneighbors = binary_dilation(m, structure=circ)
+                    val = im[mneighbors ^ m]
+                    im[m] = (np.nanmedian(val) +
+                             np.random.randn(m.sum()) * mad_std(val))
 
             if len(areas) > 0:
                 areas = np.array(areas)
-                stats.append([f(areas) for f in (np.min, np.max, np.median)])
+                stats.append(
+                    [areas.size] +
+                    [f(areas) for f in (np.sum, np.min, np.max, np.median)])
             else:
-                stats.append([-1, -1, -1])
+                stats.append([0, 0, 0, 0, 0])
 
-        mask = np.array(labels) > 0
-        sel = mask[:, self.y, self.x]
-        nmask = sel.sum(axis=1)
-        rand_values = np.random.randn(shape[0], nmask.max())
-        rand_values *= stdref[:, np.newaxis]
+        # mask = np.array(labels) > 0
 
-        for i in np.where(nmask)[0]:
-            self.normstack[i, sel[i]] = rand_values[i][:nmask[i]]
+        # sel = mask[:, self.y, self.x]
+        # nmask = sel.sum(axis=1)
+        # rand_values = np.random.randn(shape[0], nmask.max())
+        # rand_values *= stdref[:, np.newaxis]
 
-        # cube[:, self.y, self.x] = self.normstack
+        # for i in np.where(nmask)[0]:
+        #     self.normstack[i, sel[i]] = rand_values[i][:nmask[i]]
+
+        # self.normstack[mask[:, self.y, self.x]] = 0
+
         # cube[mask] = 0.
-        # self.normstack = cube[:, self.y, self.x]
+        self.normstack = cube[:, self.y, self.x]
 
-        cube = self.cube.copy()
-        cube[:, self.y, self.x] = self.normstack
         cube[self.nancube] = np.nan
-        fits.writeto('after-mask.fits', cube, overwrite=True)
+        fits.writeto('after-mask.fits', cube, header=self.header,
+                     overwrite=True)
 
-        min_, max_, median = zip(*stats)
-        masked_area = np.sum(mask, axis=(1, 2))
-
-        stats = Table(data=[nlabels, masked_area, min_, max_,
+        nlabels, total, min_, max_, median = zip(*stats)
+        # masked_area = np.sum(mask, axis=(1, 2))
+        stats = Table(data=[nlabels, total, min_, max_,
                             np.array(median, dtype=int)],
                       names=['nblobs', 'masked_area', 'min_area', 'max_area',
                              'median_area'])
@@ -927,16 +935,21 @@ class zclass(object):
         # self.recon = np.concatenate(rec)
         # self.recon *= self.variancearray[:, np.newaxis]
 
+    def make_cube_from_stack(self, stack, with_nans=False):
+        cube = self.cube.copy()
+        cube[:, self.y, self.x] = stack
+        if with_nans:
+            cube[self.nancube] = np.nan
+        return cube
+
     # stuff the stack back into a cube
     def remold(self):
         """ Subtracts the reconstructed residuals and places the cleaned
         spectra into the duplicated datacube.
         """
         logger.info('Applying correction and reshaping data product')
-        self.cleancube = self.cube.copy()
-        self.cleancube[:, self.y, self.x] = self.stack - self.recon
-        if self.run_clean:
-            self.cleancube[self.nancube] = np.nan
+        self.cleancube = self.make_cube_from_stack(self.stack - self.recon,
+                                                   with_nans=self.run_clean)
 
     # redo the residual reconstruction with a different set of parameters
     def reprocess(self, pevals=[], nevals=[]):

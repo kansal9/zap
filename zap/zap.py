@@ -73,7 +73,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
             pevals=[], nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None, pca_class=PCA, weighted=False,
+            interactive=False, ncpu=None, pca_class=None,
             n_components=None, filter_lines=False):
     """ Performs the entire ZAP sky subtraction algorithm.
 
@@ -180,8 +180,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
                            cfwidth=cfwidthSVD, mask=mask,
                            filter_lines=filter_lines)
 
-    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
-                  n_components=n_components)
+    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               pevals=pevals, nevals=nevals, optimizeType=optimizeType,
               extSVD=extSVD, filter_lines=filter_lines)
@@ -202,7 +201,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None, pca_class=PCA, weighted=False, n_components=None,
+              ncpu=None, pca_class=None, n_components=None,
               filter_lines=False):
     """ Performs the SVD decomposition of a datacube.
 
@@ -239,8 +238,7 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    zobj = zclass(musecubefits, pca_class=pca_class, weighted=weighted,
-                  n_components=n_components)
+    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
                   cfwidth=cfwidth, mask=mask, filter_lines=filter_lines)
 
@@ -386,20 +384,17 @@ class zclass(object):
 
     """
 
-    def __init__(self, musecubefits, pca_class=PCA, weighted=False,
-                 n_components=None):
+    def __init__(self, musecubefits, pca_class=None, n_components=None):
         """ Initialization of the zclass.
 
         Pulls the datacube into the class and trims it based on the known
         optimal spectral range of MUSE.
 
         """
-        hdu = fits.open(musecubefits)
-        self.cube = hdu[1].data
-        self.header = hdu[1].header
         self.musecubefits = musecubefits
-        self.weights = 1 / np.sqrt(hdu[2].data) if weighted else None
-        hdu.close()
+        with fits.open(musecubefits) as hdul:
+            self.cube = hdul[1].data
+            self.header = hdul[1].header
 
         # Workaround for floating points errors in wcs computation: if cunit is
         # specified, wcslib will convert in meters instead of angstroms, so we
@@ -460,8 +455,13 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
-        logger.info('Using %s', pca_class)
-        self.pca_class = pca_class
+        if pca_class is not None:
+            logger.info('Using %s', pca_class)
+            self.pca_class = pca_class
+        else:
+            logger.info("Using scikit-learn's PCA")
+            self.pca_class = PCA
+
         # self.especeval = []
         # self.subespeceval = []
 
@@ -672,8 +672,8 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fwhm=1.0, nsigma=5, max_area=500):
-        logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fwhm,
+    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=3, max_area=500):
+        logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fsf,
                     nsigma)
         # Reconstruct a cube from the continuum filtered stack
         cube = self.make_cube_from_stack(self.normstack, with_nans=True)
@@ -684,20 +684,21 @@ class zclass(object):
         labels, nlabels = ndi.label(nanmask)
         maxlabel = np.argmax([np.sum(labels == l)
                               for l in range(1, nlabels+1)]) + 1
-        struct_sq = np.ones((3, 3), dtype=bool)
-        mask = binary_dilation(labels == maxlabel, structure=struct_sq)
+        mask = binary_dilation(labels == maxlabel,
+                               structure=np.ones((3, 3), dtype=bool))
         cube[:, mask] = np.nan
-        # stdref = mad_std(cube, axis=(1, 2))
 
+        # Normalize data
         med = np.nanmedian(cube, axis=(1, 2))
         cube -= med[:, np.newaxis, np.newaxis]
+        cube /= np.sqrt(fits.getdata(self.musecubefits, ext=2))
 
         cmask = np.isnan(cube)
         cube[cmask] = 0.
 
         # Spectral convolution
         logger.info('Running spectral convolution ...')
-        stddev = 5.0/1.25*gaussian_fwhm_to_sigma
+        stddev = lsf / self.header['CD3_3'] * gaussian_fwhm_to_sigma
         res = parallel_map(_iconv_spectral, cube.reshape(shape[0], -1),
                            NCPU, axis=1, stddev=stddev)
         cube = np.concatenate(res, axis=1).reshape(shape)
@@ -705,7 +706,7 @@ class zclass(object):
         # Spatial convolution
         logger.info('Running spatial convolution ...')
         cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
-        stddev = fwhm / (cdelt * 3600) * gaussian_fwhm_to_sigma
+        stddev = fsf / (cdelt * 3600) * gaussian_fwhm_to_sigma
         res = parallel_map(_iconv_spatial, cube, NCPU, axis=0, stddev=stddev)
         cube = np.concatenate(res, axis=0)
         fits.writeto('after-conv.fits', cube, header=self.header,
@@ -729,7 +730,7 @@ class zclass(object):
 
         logger.info('Dilating mask ...')
         # struct = np.array([1, 1, 1])[:, np.newaxis, np.newaxis]
-        struct = np.ones((5, 1, 1))
+        struct = np.ones((5, 3, 3))
         mask = binary_dilation(mask, structure=struct, iterations=1)
         fits.writeto('before-filter.fits', mask.astype(np.uint8),
                      header=self.header, overwrite=True)
@@ -739,14 +740,19 @@ class zclass(object):
         stats = []
         for maskim, im in zip(mask, cube):
             labels, nl = ndi.label(maskim)
-            areas = []
+            areas = [np.sum(labels == l) for l in range(1, nl+1)]
+
+            # TODO: Enhance blobs filtering:
+            # - if nb of blobs is too high
+            # - if area is too big
+
             for label in range(1, nl+1):
                 m = labels == label
                 area = np.sum(m)
                 if area > max_area:
                     maskim[m] = 0
+                    del areas[label - 1]
                 else:
-                    areas.append(area)
                     mneighbors = binary_dilation(m, structure=circ)
                     val = im[mneighbors ^ m]
                     im[m] = (np.nanmedian(val) +
@@ -762,16 +768,7 @@ class zclass(object):
 
         # mask = np.array(labels) > 0
 
-        # sel = mask[:, self.y, self.x]
-        # nmask = sel.sum(axis=1)
-        # rand_values = np.random.randn(shape[0], nmask.max())
-        # rand_values *= stdref[:, np.newaxis]
-
-        # for i in np.where(nmask)[0]:
-        #     self.normstack[i, sel[i]] = rand_values[i][:nmask[i]]
-
         # self.normstack[mask[:, self.y, self.x]] = 0
-
         # cube[mask] = 0.
         self.normstack = cube[:, self.y, self.x]
 
@@ -915,7 +912,7 @@ class zclass(object):
         indices = [x[0] for x in self.pranges[1:]]
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
-        # Xnew = [model.transform(x, weights=self.weights)
+
         Xnew = [model.transform(x)
                 for model, x in zip(self.models, Xarr)]
         Xinv = [model.inverse_transform(x)

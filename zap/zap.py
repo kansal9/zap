@@ -672,9 +672,10 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=3, max_area=500):
-        logger.info('Cleaning emission lines, fwhm=%.2f, nsigma=%d', fsf,
-                    nsigma)
+    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=3, max_area=500,
+                     max_nblobs=5):
+        logger.info('Cleaning emission lines, fsf_fwhm=%.2f, lsf_fwhm=%.2f, '
+                    'nsigma=%d', fsf, lsf, nsigma)
         # Reconstruct a cube from the continuum filtered stack
         cube = self.make_cube_from_stack(self.normstack, with_nans=True)
         shape = cube.shape
@@ -709,8 +710,6 @@ class zclass(object):
         stddev = fsf / (cdelt * 3600) * gaussian_fwhm_to_sigma
         res = parallel_map(_iconv_spatial, cube, NCPU, axis=0, stddev=stddev)
         cube = np.concatenate(res, axis=0)
-        fits.writeto('after-conv.fits', cube, header=self.header,
-                     overwrite=True)
 
         logger.info('Running morphological opening ...')
         circ = np.array([[0, 1, 1, 1, 0],
@@ -718,9 +717,12 @@ class zclass(object):
                          [1, 1, 1, 1, 1],
                          [1, 1, 1, 1, 1],
                          [0, 1, 1, 1, 0]])
-        # struct = ndi.iterate_structure(
-        #     ndi.generate_binary_structure(3, 1), 2).astype(int)
-        cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
+        struct = ndi.iterate_structure(
+            ndi.generate_binary_structure(3, 1), 2).astype(int)
+        # cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
+        cube = grey_opening(cube, structure=struct)
+        fits.writeto('after-conv.fits', cube, header=self.header,
+                     overwrite=True)
 
         cube[cmask] = np.nan
         std = nsigma * mad_std(cube, axis=(1, 2))
@@ -728,45 +730,47 @@ class zclass(object):
         mask = cube > std[:, np.newaxis, np.newaxis]
         # mask[[0, -1]] = False
 
-        logger.info('Dilating mask ...')
-        # struct = np.array([1, 1, 1])[:, np.newaxis, np.newaxis]
-        struct = np.ones((5, 3, 3))
-        mask = binary_dilation(mask, structure=struct, iterations=1)
         fits.writeto('before-filter.fits', mask.astype(np.uint8),
                      header=self.header, overwrite=True)
 
-        logger.info('Filtering and filling blobs ...')
-        cube = self.make_cube_from_stack(self.normstack)
+        logger.info('Filtering blobs ...')
         stats = []
-        for maskim, im in zip(mask, cube):
-            labels, nl = ndi.label(maskim)
-            areas = [np.sum(labels == l) for l in range(1, nl+1)]
+        for maskim in mask:
+            imlab, nl = ndi.label(maskim)
+            labels = list(range(1, nl+1))
+            areas = np.array([np.sum(imlab == l) for l in labels])
+            if nl > max_nblobs:
+                idx = np.argsort(areas)
+                labels = np.array(labels)[idx[:max_nblobs]]
+                areas = areas[idx[:max_nblobs]]
+                maskim[:] = np.logical_or.reduce([imlab == l for l in labels])
+                # for label in labels:
+                #     maskim[imlab == label] = True
 
-            # TODO: Enhance blobs filtering:
-            # - if nb of blobs is too high
-            # - if area is too big
-
-            for label in range(1, nl+1):
-                m = labels == label
-                area = np.sum(m)
-                if area > max_area:
-                    maskim[m] = 0
-                    del areas[label - 1]
-                else:
-                    mneighbors = binary_dilation(m, structure=circ)
-                    val = im[mneighbors ^ m]
-                    im[m] = (np.nanmedian(val) +
-                             np.random.randn(m.sum()) * mad_std(val))
-
-            if len(areas) > 0:
-                areas = np.array(areas)
+            if areas.size == 0:
+                stats.append([0, 0, 0, 0, 0])
+            elif areas.size == 1:
+                area = areas[0]
+                stats.append([1, area, area, area, area])
+            else:
                 stats.append(
                     [areas.size] +
                     [f(areas) for f in (np.sum, np.min, np.max, np.median)])
-            else:
-                stats.append([0, 0, 0, 0, 0])
 
-        # mask = np.array(labels) > 0
+        logger.info('Dilating mask ...')
+        struct = np.ones((5, 3, 3))
+        mask = binary_dilation(mask, structure=struct, iterations=1)
+
+        logger.info('Filling blobs ...')
+        cube = self.make_cube_from_stack(self.normstack)
+        for maskim, im in zip(mask, cube):
+            imlabels, nl = ndi.label(maskim)
+            for label in range(1, nl+1):
+                m = imlabels == label
+                mneighbors = binary_dilation(m, structure=circ)
+                val = im[mneighbors ^ m]
+                im[m] = (np.nanmedian(val) +
+                         np.random.randn(m.sum()) * mad_std(val))
 
         # self.normstack[mask[:, self.y, self.x]] = 0
         # cube[mask] = 0.

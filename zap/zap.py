@@ -37,7 +37,8 @@ from astropy.wcs import WCS
 from astropy.table import Table
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
-from numpy import ma
+from numpy import nanmedian, nanmean
+from numpy.random import randn
 from scipy.ndimage import binary_dilation, grey_opening
 from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
@@ -681,20 +682,21 @@ class zclass(object):
         shape = cube.shape
 
         # Mask edges by dilating the mask from the nan region
-        nanmask = np.sum(np.isnan(cube), axis=0) / shape[0] > 0.25
+        cmask = np.isnan(cube)
+        nanmask = np.sum(cmask, axis=0) > (0.25 * shape[0])
         labels, nlabels = ndi.label(nanmask)
         maxlabel = np.argmax([np.sum(labels == l)
                               for l in range(1, nlabels+1)]) + 1
         mask = binary_dilation(labels == maxlabel,
                                structure=np.ones((3, 3), dtype=bool))
-        cube[:, mask] = np.nan
+        # cube[:, mask] = np.nan
+        cmask |= mask
 
         # Normalize data
-        med = np.nanmedian(cube, axis=(1, 2))
+        med = nanmedian(cube, axis=(1, 2))
         cube -= med[:, np.newaxis, np.newaxis]
         cube /= np.sqrt(fits.getdata(self.musecubefits, ext=2))
 
-        cmask = np.isnan(cube)
         cube[cmask] = 0.
 
         # Spectral convolution
@@ -712,30 +714,35 @@ class zclass(object):
         cube = np.concatenate(res, axis=0)
 
         logger.info('Running morphological opening ...')
-        circ = np.array([[0, 1, 1, 1, 0],
-                         [1, 1, 1, 1, 1],
-                         [1, 1, 1, 1, 1],
-                         [1, 1, 1, 1, 1],
-                         [0, 1, 1, 1, 0]])
         struct = ndi.iterate_structure(
             ndi.generate_binary_structure(3, 1), 2).astype(int)
         # cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
         cube = grey_opening(cube, structure=struct)
-        fits.writeto('after-conv.fits', cube, header=self.header,
-                     overwrite=True)
+        # fits.writeto('after-conv.fits', cube, header=self.header,
+        #              overwrite=True)
 
         cube[cmask] = np.nan
         std = nsigma * mad_std(cube, axis=(1, 2))
         cube[cmask] = 0.
         mask = cube > std[:, np.newaxis, np.newaxis]
-        # mask[[0, -1]] = False
 
-        fits.writeto('before-filter.fits', mask.astype(np.uint8),
-                     header=self.header, overwrite=True)
+        # fits.writeto('before-filter.fits', mask.astype(np.uint8),
+        #              header=self.header, overwrite=True)
 
-        logger.info('Filtering blobs ...')
+        # logger.info('Dilating mask ...')
+        # struct = np.ones((5, 3, 3))
+        # mask = binary_dilation(mask, structure=struct, iterations=1)
+
+        logger.info('Filtering and filling blobs ...')
         stats = []
-        for maskim in mask:
+        cube = self.make_cube_from_stack(self.normstack)
+        circ = np.array([[0, 1, 1, 1, 0],
+                         [1, 1, 1, 1, 1],
+                         [1, 1, 1, 1, 1],
+                         [1, 1, 1, 1, 1],
+                         [0, 1, 1, 1, 0]], dtype=bool)
+
+        for maskim, im in zip(mask, cube):
             imlab, nl = ndi.label(maskim)
             labels = list(range(1, nl+1))
             areas = np.array([np.sum(imlab == l) for l in labels])
@@ -744,8 +751,6 @@ class zclass(object):
                 labels = np.array(labels)[idx[:max_nblobs]]
                 areas = areas[idx[:max_nblobs]]
                 maskim[:] = np.logical_or.reduce([imlab == l for l in labels])
-                # for label in labels:
-                #     maskim[imlab == label] = True
 
             if areas.size == 0:
                 stats.append([0, 0, 0, 0, 0])
@@ -757,31 +762,18 @@ class zclass(object):
                     [areas.size] +
                     [f(areas) for f in (np.sum, np.min, np.max, np.median)])
 
-        logger.info('Dilating mask ...')
-        struct = np.ones((5, 3, 3))
-        mask = binary_dilation(mask, structure=struct, iterations=1)
-
-        logger.info('Filling blobs ...')
-        cube = self.make_cube_from_stack(self.normstack)
-        for maskim, im in zip(mask, cube):
-            imlabels, nl = ndi.label(maskim)
-            for label in range(1, nl+1):
-                m = imlabels == label
+            for label in labels:
+                m = imlab == label
                 mneighbors = binary_dilation(m, structure=circ)
                 val = im[mneighbors ^ m]
-                im[m] = (np.nanmedian(val) +
-                         np.random.randn(m.sum()) * mad_std(val))
+                im[m] = nanmedian(val) + randn(m.sum()) * mad_std(val)
 
-        # self.normstack[mask[:, self.y, self.x]] = 0
-        # cube[mask] = 0.
         self.normstack = cube[:, self.y, self.x]
-
-        cube[self.nancube] = np.nan
-        fits.writeto('after-mask.fits', cube, header=self.header,
-                     overwrite=True)
+        # cube[self.nancube] = np.nan
+        # fits.writeto('after-mask.fits', cube, header=self.header,
+        #              overwrite=True)
 
         nlabels, total, min_, max_, median = zip(*stats)
-        # masked_area = np.sum(mask, axis=(1, 2))
         stats = Table(data=[nlabels, total, min_, max_,
                             np.array(median, dtype=int)],
                       names=['nblobs', 'masked_area', 'min_area', 'max_area',
@@ -963,7 +955,6 @@ class zclass(object):
         self.reconstruct()
         self.remold()
 
-    @timeit
     def optimize(self):
         """ Function to optimize the number of components used to characterize
         the residuals.
@@ -1244,7 +1235,7 @@ def median_absolute_deviation(a, axis=None):
     """
 
     a = np.asanyarray(a)
-    a_median = np.nanmedian(a, axis=axis)
+    a_median = nanmedian(a, axis=axis)
 
     # broadcast the median array before subtraction
     if axis is not None:
@@ -1254,7 +1245,7 @@ def median_absolute_deviation(a, axis=None):
         else:
             a_median = np.expand_dims(a_median, axis=axis)
 
-    return np.nanmedian(np.abs(a - a_median), axis=axis)
+    return nanmedian(np.abs(a - a_median), axis=axis)
 
 
 def mad_std(data, axis=None):
@@ -1514,6 +1505,5 @@ def _nanclean(cube, rejectratio=0.25, boxsz=1):
                 neighbor[outsider, icounter] = np.nan
                 icounter = icounter + 1
 
-    mn = ma.masked_invalid(neighbor)
-    cleancube[z, y, x] = mn.mean(axis=1).filled(np.nan)
+    cleancube[z, y, x] = nanmean(neighbor, axis=1)
     return cleancube, badcube

@@ -39,7 +39,7 @@ from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from numpy import nanmedian, nanmean
 from numpy.random import randn
-from scipy.ndimage import binary_dilation, grey_opening
+from scipy.ndimage import binary_dilation, generate_binary_structure
 from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
@@ -673,7 +673,7 @@ class zclass(object):
         self.normstack = self.stack - self.contarray
 
     @timeit
-    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=3, max_area=500,
+    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=4, max_area=500,
                      max_nblobs=5):
         logger.info('Cleaning emission lines, fsf_fwhm=%.2f, lsf_fwhm=%.2f, '
                     'nsigma=%d', fsf, lsf, nsigma)
@@ -682,7 +682,8 @@ class zclass(object):
         shape = cube.shape
 
         # Mask edges by dilating the mask from the nan region
-        cmask = np.isnan(cube)
+        var = fits.getdata(self.musecubefits, ext=2)
+        cmask = np.isnan(cube) | np.isnan(var)
         nanmask = np.sum(cmask, axis=0) > (0.25 * shape[0])
         labels, nlabels = ndi.label(nanmask)
         maxlabel = np.argmax([np.sum(labels == l)
@@ -695,39 +696,52 @@ class zclass(object):
         # Normalize data
         med = nanmedian(cube, axis=(1, 2))
         cube -= med[:, np.newaxis, np.newaxis]
-        cube /= np.sqrt(fits.getdata(self.musecubefits, ext=2))
+        # cube /= np.sqrt(fits.getdata(self.musecubefits, ext=2))
 
         cube[cmask] = 0.
+        var[cmask] = 0.
 
         # Spectral convolution
         logger.info('Running spectral convolution ...')
         stddev = lsf / self.header['CD3_3'] * gaussian_fwhm_to_sigma
-        res = parallel_map(_iconv_spectral, cube.reshape(shape[0], -1),
-                           NCPU, axis=1, stddev=stddev)
-        cube = np.concatenate(res, axis=1).reshape(shape)
+        cube, var = zip(*parallel_map(
+            _iconv_spectral, cube.reshape(shape[0], -1), NCPU, axis=1,
+            stddev=stddev, split_arrays=[var.reshape(shape[0], -1)]))
+        cube = np.concatenate(cube, axis=1).reshape(shape)
+        var = np.concatenate(var, axis=1).reshape(shape)
 
         # Spatial convolution
         logger.info('Running spatial convolution ...')
         cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
         stddev = fsf / (cdelt * 3600) * gaussian_fwhm_to_sigma
-        res = parallel_map(_iconv_spatial, cube, NCPU, axis=0, stddev=stddev)
-        cube = np.concatenate(res, axis=0)
+        cube, var = zip(*parallel_map(_iconv_spatial, cube, NCPU, axis=0,
+                                      stddev=stddev, split_arrays=[var]))
+        cube = np.concatenate(cube, axis=0)
+        var = np.concatenate(var, axis=0)
 
-        logger.info('Running morphological opening ...')
-        struct = ndi.iterate_structure(
-            ndi.generate_binary_structure(3, 1), 2).astype(int)
-        # cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
-        cube = grey_opening(cube, structure=struct)
-        # fits.writeto('after-conv.fits', cube, header=self.header,
-        #              overwrite=True)
+        var[cmask] = np.inf
+        np.sqrt(var, out=var)
+        cube /= var
+        fits.writeto('after-conv.fits', cube, header=self.header,
+                     overwrite=True)
 
         cube[cmask] = np.nan
         std = nsigma * mad_std(cube, axis=(1, 2))
         cube[cmask] = 0.
         mask = cube > std[:, np.newaxis, np.newaxis]
 
-        # fits.writeto('before-filter.fits', mask.astype(np.uint8),
-        #              header=self.header, overwrite=True)
+        fits.writeto('before-opening.fits', mask.astype(np.uint8),
+                     header=self.header, overwrite=True)
+
+        logger.info('Running morphological opening ...')
+        # cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
+        # cube = grey_opening(cube, structure=struct)
+        struct = ndi.iterate_structure(generate_binary_structure(3, 1), 2)
+        mask = ndi.binary_opening(mask, structure=struct[1:-1])
+        mask = binary_dilation(mask, structure=generate_binary_structure(3, 1))
+
+        fits.writeto('before-filter.fits', mask.astype(np.uint8),
+                     header=self.header, overwrite=True)
 
         # logger.info('Dilating mask ...')
         # struct = np.ones((5, 3, 3))
@@ -1194,8 +1208,15 @@ def parallel_map(func, arr, indices, **kwargs):
     err_q = manager.Queue()
     jobs = []
     chunks = np.array_split(arr, indices, axis=axis)
+    if 'split_arrays' in kwargs:
+        split_arrays = [np.array_split(a, indices, axis=axis)
+                        for a in kwargs.pop('split_arrays')]
+    else:
+        split_arrays = None
 
     for i, chunk in enumerate(chunks):
+        if split_arrays:
+            kwargs['split_arrays'] = [s[i] for s in split_arrays]
         p = Process(target=worker, args=(func, i, chunk, out_q, err_q, kwargs))
         jobs.append(p)
         p.start()
@@ -1344,17 +1365,20 @@ def wmedian(spec, wt, cfwidth=100):
     return wmed
 
 
-def _iconv_spectral(i, cube, stddev=1.):
-    # logger.debug('Running spectral conv %d with cube %s', i, cube.shape)
+def _iconv_spectral(i, cube, stddev=1., split_arrays=None):
+    logger.debug('Running spectral conv %d with cube %s, var %s',
+                 i, cube.shape, split_arrays[0].shape)
     b = Gaussian1DKernel(stddev=stddev)
     b.normalize()
     kernel = b.array[:, np.newaxis]
     cube = fftconvolve(cube, kernel, mode='same')
-    return cube
+    var = fftconvolve(split_arrays[0], kernel, mode='same')
+    return cube, var
 
 
-def _iconv_spatial(i, cube, stddev=1.):
-    # logger.debug('Running spatial conv %d with cube %s', i, cube.shape)
+def _iconv_spatial(i, cube, stddev=1., split_arrays=None):
+    logger.debug('Running spatial conv %d with cube %s, var %s',
+                 i, cube.shape, split_arrays[0].shape)
     a = Gaussian2DKernel(stddev=stddev)
     a.normalize()
     kernel = a.array[np.newaxis, ...]
@@ -1362,7 +1386,8 @@ def _iconv_spatial(i, cube, stddev=1.):
     # b.normalize()
     # kernel = a.array[np.newaxis, ...] * b.array[:, np.newaxis, np.newaxis]
     cube = fftconvolve(cube, kernel, mode='same')
-    return cube
+    var = fftconvolve(split_arrays[0], kernel, mode='same')
+    return cube, var
 
 
 # ### SVD #####

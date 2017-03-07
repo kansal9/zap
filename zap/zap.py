@@ -38,7 +38,8 @@ from astropy.table import Table
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from numpy import nanmedian, nanmean
-from numpy.random import randn
+# from numpy.random import randn
+# from scipy.interpolate import NearestNDInterpolator, griddata
 from scipy.ndimage import binary_dilation, generate_binary_structure
 from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
@@ -456,10 +457,15 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
+        self.weighted = False
         if pca_class is not None:
             logger.info('Using %s', pca_class)
             self.pca_class = pca_class
         else:
+            # from wpca import WPCA
+            # self.pca_class = WPCA
+            # self.weighted = True
+            # logger.info("Using weighted PCA")
             logger.info("Using scikit-learn's PCA")
             self.pca_class = PCA
 
@@ -674,7 +680,7 @@ class zclass(object):
 
     @timeit
     def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=4, max_area=500,
-                     max_nblobs=5):
+                     max_nblobs=8):
         logger.info('Cleaning emission lines, fsf_fwhm=%.2f, lsf_fwhm=%.2f, '
                     'nsigma=%d', fsf, lsf, nsigma)
         # Reconstruct a cube from the continuum filtered stack
@@ -750,11 +756,7 @@ class zclass(object):
         logger.info('Filtering and filling blobs ...')
         stats = []
         cube = self.make_cube_from_stack(self.normstack)
-        circ = np.array([[0, 1, 1, 1, 0],
-                         [1, 1, 1, 1, 1],
-                         [1, 1, 1, 1, 1],
-                         [1, 1, 1, 1, 1],
-                         [0, 1, 1, 1, 0]], dtype=bool)
+        cube[np.isnan(cube)] = 0.
 
         for maskim, im in zip(mask, cube):
             imlab, nl = ndi.label(maskim)
@@ -776,16 +778,52 @@ class zclass(object):
                     [areas.size] +
                     [f(areas) for f in (np.sum, np.min, np.max, np.median)])
 
-            for label in labels:
-                m = imlab == label
-                mneighbors = binary_dilation(m, structure=circ)
-                val = im[mneighbors ^ m]
-                im[m] = nanmedian(val) + randn(m.sum()) * mad_std(val)
+            if not self.weighted:
+                for label in labels:
+                    m = imlab == label
+                    sy, sx = ndi.find_objects(m)[0]
+                    ny, nx = (sy.stop - sy.start, sx.stop - sx.start)
+
+                    offy = 0 # - ny if sy.start > m.shape[0] // 2 else ny
+                    offx = - nx if sx.start > m.shape[1] // 2 else nx
+
+                    soffy = slice(sy.start + offy, sy.stop + offy)
+                    soffx = slice(sx.start + offx, sx.stop + offx)
+
+                    masked = m[sy, sx]
+                    im[sy, sx][masked] = im[soffy, soffx][masked]
+
+                    # margin = (sx.stop - sx.start)
+                    # sx = slice(max(0, sx.start - margin),
+                    #            min(sx.stop + margin, m.shape[0]))
+                    # margin = (sy.stop - sy.start)
+                    # sy = slice(max(0, sy.start - margin),
+                    #            min(sy.stop + margin, m.shape[1]))
+                    # masked = m[sy, sx]
+                    # notm = ~masked
+                    # data = im[sy, sx]
+                    # pos = np.mgrid[:masked.shape[0], :masked.shape[1]]
+                    # # interp = NearestNDInterpolator(pos[:, notm].T, data[notm])
+                    # # data[list(pos[:, masked])] = interp(pos[:, masked].T)
+                    # data[list(pos[:, masked])] = griddata(
+                    #     pos[:, notm].T, data[notm], pos[:, masked].T,
+                    #     method='cubic')
+
+                # for label in labels:
+                #     m = imlab == label
+                #     mneighbors = binary_dilation(m, structure=circ)
+                #     val = im[mneighbors ^ m]
+                #     im[m] = nanmedian(val) + randn(m.sum()) * mad_std(val)
+
+        if self.weighted:
+            var = fits.getdata(self.musecubefits, ext=2)
+            var[mask | cmask] = np.inf
+            self.weights = 1 / np.sqrt(var[:, self.y, self.x])
 
         self.normstack = cube[:, self.y, self.x]
-        # cube[self.nancube] = np.nan
-        # fits.writeto('after-mask.fits', cube, header=self.header,
-        #              overwrite=True)
+        cube[self.nancube] = np.nan
+        fits.writeto('after-mask.fits', cube, header=self.header,
+                     overwrite=True)
 
         nlabels, total, min_, max_, median = zip(*stats)
         stats = Table(data=[nlabels, total, min_, max_,
@@ -923,8 +961,16 @@ class zclass(object):
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
 
-        Xnew = [model.transform(x)
-                for model, x in zip(self.models, Xarr)]
+        if self.weighted:
+            logger.info('Using weights')
+            Warr = np.array_split(self.weights.T, indices, axis=1)
+            Xnew = []
+            for model, x, w in zip(self.models, Xarr, Warr):
+                w[w.sum(axis=1) < 1e-8] = 1e-8
+                Xnew.append(model.transform(x, weights=w))
+        else:
+            Xnew = [model.transform(x)
+                    for model, x in zip(self.models, Xarr)]
         Xinv = [model.inverse_transform(x)
                 for model, x in zip(self.models, Xnew)]
         # self.recon = np.concatenate([x.T for x in Xinv])
@@ -1366,25 +1412,22 @@ def wmedian(spec, wt, cfwidth=100):
 
 
 def _iconv_spectral(i, cube, stddev=1., split_arrays=None):
-    logger.debug('Running spectral conv %d with cube %s, var %s',
-                 i, cube.shape, split_arrays[0].shape)
-    b = Gaussian1DKernel(stddev=stddev)
-    b.normalize()
-    kernel = b.array[:, np.newaxis]
+    # logger.debug('Running spectral conv %d with cube %s, var %s',
+    #              i, cube.shape, split_arrays[0].shape)
+    kernel = Gaussian1DKernel(stddev=stddev)
+    kernel.normalize()
+    kernel = kernel.array[:, np.newaxis]
     cube = fftconvolve(cube, kernel, mode='same')
     var = fftconvolve(split_arrays[0], kernel, mode='same')
     return cube, var
 
 
 def _iconv_spatial(i, cube, stddev=1., split_arrays=None):
-    logger.debug('Running spatial conv %d with cube %s, var %s',
-                 i, cube.shape, split_arrays[0].shape)
-    a = Gaussian2DKernel(stddev=stddev)
-    a.normalize()
-    kernel = a.array[np.newaxis, ...]
-    # b = Gaussian1DKernel(stddev=5.0/1.25*gaussian_fwhm_to_sigma)
-    # b.normalize()
-    # kernel = a.array[np.newaxis, ...] * b.array[:, np.newaxis, np.newaxis]
+    # logger.debug('Running spatial conv %d with cube %s, var %s',
+    #              i, cube.shape, split_arrays[0].shape)
+    kernel = Gaussian2DKernel(stddev=stddev)
+    kernel.normalize()
+    kernel = kernel.array[np.newaxis, ...]
     cube = fftconvolve(cube, kernel, mode='same')
     var = fftconvolve(split_arrays[0], kernel, mode='same')
     return cube, var

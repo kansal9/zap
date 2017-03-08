@@ -4,7 +4,7 @@ import os
 import subprocess
 from setuptools import setup, find_packages
 
-# Generate version.py
+# Read version.py
 __version__ = None
 with open('zap/version.py') as f:
     exec(f.read())
@@ -45,7 +45,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     zip_safe=False,
-    install_requires=['numpy', 'scipy', 'astropy'],
+    install_requires=['numpy', 'scipy', 'astropy', 'scikit-learn'],
     extras_require={'plot': ['matplotlib']},
     entry_points={
         'console_scripts': ['zap = zap.__main__:main']

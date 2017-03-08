@@ -62,14 +62,12 @@ logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-###############################################################################
-################################### Top Level Functions #######################
-###############################################################################
+# ================= Top Level Functions =================
 
 
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
-            pevals=[], nevals=[], optimizeType='normal', extSVD=None,
+            nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
             interactive=False, ncpu=None, pca_class=None, n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
@@ -108,18 +106,13 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     optimizeType : str
         Optimization method to compute the number of eigenspectra used for each
         segment: `none`, `normal` (default), `enhanced`. If `none`, the number
-        of eigenspectra must be specified with `nevals` or `pevals`, otherwise
+        of eigenspectra must be specified with `nevals`, otherwise
         `normal` is used.
-    pevals : list
-        Allow to specify the percentage of eigenspectra used for each segment.
-        If this is used, the pevals is ignored. Provide either a single value
-        that will be used for all of the segments, or a list of 11 values that
-        will be used for each of the segments.
     nevals : list
         Allow to specify the number of eigenspectra used for each segment.
-        If this is used, the pevals is ignored. Provide either a single value
-        that will be used for all of the segments, or a list of 11 values that
-        will be used for each of the segments.
+        Provide either a single value that will be used for all of the
+        segments, or a list of 11 values that will be used for each of the
+        segments.
     extSVD : str
         Path of an input FITS file containing a SVD computed by the
         :func:`~zap.SVDoutput` function. Otherwise the SVD is computed.
@@ -178,8 +171,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
-              pevals=pevals, nevals=nevals, optimizeType=optimizeType,
-              extSVD=extSVD)
+              nevals=nevals, optimizeType=optimizeType, extSVD=extSVD)
 
     if interactive:
         # Return the zobj object without saving files
@@ -315,9 +307,7 @@ def timeit(func):
     return wrapped
 
 
-###############################################################################
-##################################### Process Steps ###########################
-###############################################################################
+# ================= Main class =================
 
 class zclass(object):
 
@@ -358,9 +348,6 @@ class zclass(object):
         Boolean indicating that the zero level correction was used.
     stack : numpy.ndarray
         The datacube deconstructed into a 2d array for use in the the SVD.
-    subespeceval : list of (eigenspectra, eval)
-        The subset of eigenvalues and eigenspectra used to reconstruct the sky
-        residuals.
     variancearray : numpy.ndarray
         A list of length nsegments containing variances calculated per spaxel
         used for normalization
@@ -490,8 +477,7 @@ class zclass(object):
 
     @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
-             cfwidth=100, pevals=[], nevals=[], optimizeType='normal',
-             extSVD=None):
+             cfwidth=100, nevals=[], optimizeType='normal', extSVD=None):
         """ Perform all zclass to ZAP a datacube:
 
         - NaN re/masking,
@@ -519,11 +505,11 @@ class zclass(object):
 
         # choose some fraction of eigenspectra or some finite number of
         # eigenspectra
-        if optimizeType != 'none' or (nevals == [] and pevals == []):
+        if optimizeType != 'none' or nevals == []:
             self.optimize()
             self.chooseevals(nevals=self.nevals)
         else:
-            self.chooseevals(pevals=pevals, nevals=nevals)
+            self.chooseevals(nevals=nevals)
 
         # reconstruct the sky residuals using the subset of eigenspace
         self.reconstruct()
@@ -688,7 +674,7 @@ class zclass(object):
 
             self.models.append(self.pca_class(n_components=ncomp).fit(x))
 
-    def chooseevals(self, nevals=[], pevals=[]):
+    def chooseevals(self, nevals=[]):
         """ Choose the number of eigenspectra/evals to use for reconstruction.
 
         User supplies the number of eigen spectra to be used (neval) or the
@@ -701,16 +687,8 @@ class zclass(object):
         """
         nranges = len(self.pranges)
         nevals = np.atleast_1d(nevals)
-        # pevals = np.atleast_1d(pevals)
-        # nespec = np.array([self.especeval[i][0].shape[1]
-        #                    for i in range(nranges)])
 
-        # # deal with no selection
-        # if len(nevals) == 0 and len(pevals) == 0:
-        #     logger.info('Number of modes not selected')
-        #     nevals = np.array([1])
-
-        # # deal with an input list
+        # deal with an input list
         if len(nevals) > 1:
             if len(nevals) != nranges:
                 nevals = np.array([nevals[0]])
@@ -719,21 +697,6 @@ class zclass(object):
             else:
                 logger.info('Choosing %s eigenspectra for segments', nevals)
 
-        # if len(pevals) > 1:
-        #     if len(pevals) != nranges:
-        #         pevals = np.array([pevals[0]])
-        #         logger.info('Chosen eigenspectra array does not correspond to '
-        #                     'number of segments')
-        #     else:
-        #         logger.info('Choosing %s%% of eigenspectra for segments',
-        #                     pevals)
-        #         nevals = (pevals * nespec / 100.).round().astype(int)
-
-        # # deal with single value entries
-        # if len(pevals) == 1:
-        #     logger.info('Choosing %s%% of eigenspectra for all segments',
-        #                 pevals)
-        #     nevals = (pevals * nespec / 100.).round().astype(int)
         if len(nevals) == 1:
             logger.info('Choosing %s eigenspectra for all segments', nevals)
             nevals = np.zeros(nranges, dtype=int) + nevals
@@ -744,15 +707,6 @@ class zclass(object):
         else:
             start, end = nevals.T
 
-        # # take subset of the eigenspectra and put them in a list
-        # subespeceval = []
-        # for i in range(nranges):
-        #     eigenspectra, evals = self.especeval[i]
-        #     tevals = (evals[start[i]:end[i], :]).copy()
-        #     teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
-        #     subespeceval.append((teigenspectra, tevals))
-
-        # self.subespeceval = subespeceval
         self.nevals = nevals
         for i, model in enumerate(self.models):
                 model.components_ = self.components[i][start[i]:end[i]]
@@ -793,11 +747,11 @@ class zclass(object):
         self.cleancube = self.make_cube_from_stack(self.stack - self.recon,
                                                    with_nans=self.run_clean)
 
-    def reprocess(self, pevals=[], nevals=[]):
+    def reprocess(self, nevals=[]):
         """ A method that redoes the eigenvalue selection, reconstruction, and
         remolding of the data.
         """
-        self.chooseevals(pevals=pevals, nevals=nevals)
+        self.chooseevals(nevals=nevals)
         self.reconstruct()
         self.remold()
 
@@ -835,11 +789,6 @@ class zclass(object):
             ncomp.append(np.where(cross)[0][0])
 
         self.nevals = np.array(ncomp)
-
-
-    # #########################################################################
-    # #################################### Extra Functions ####################
-    # #########################################################################
 
     def make_contcube(self):
         """ Remold the continuum array so it can be investigated.
@@ -883,10 +832,6 @@ class zclass(object):
         logger.info('Masking %d pixels (%d%%)', nmasked,
                     nmasked / np.prod(mask.shape) * 100)
         self.cube[:, mask] = np.nan
-
-    ###########################################################################
-    ##################################### Output Functions ####################
-    ###########################################################################
 
     def writecube(self, outcubefits='DATACUBE_ZAP.fits'):
         """Write the processed datacube to an individual fits file."""
@@ -985,9 +930,8 @@ class zclass(object):
         for i in range(nseg):
             self.plotvarcurve(i=i, ax=axes[i])
 
-###############################################################################
-##################################### Helper Functions ########################
-###############################################################################
+
+# ================= Helper Functions =================
 
 
 def worker(f, i, chunk, out_q, err_q, kwargs):
@@ -1083,8 +1027,6 @@ def mad_std(data, axis=None):
     # NOTE: 1. / scipy.stats.norm.ppf(0.75) = 1.482602218505602
     return median_absolute_deviation(data, axis=axis) * 1.482602218505602
 
-
-##### Continuum Filtering #####
 
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
     if cftype == 'median':

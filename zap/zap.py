@@ -450,15 +450,10 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
-        self.weighted = False
         if pca_class is not None:
             logger.info('Using %s', pca_class)
             self.pca_class = pca_class
         else:
-            # from wpca import WPCA
-            # self.pca_class = WPCA
-            # self.weighted = True
-            # logger.info("Using weighted PCA")
             logger.info("Using scikit-learn's PCA")
             self.pca_class = PCA
 
@@ -786,22 +781,13 @@ class zclass(object):
         indices = [x[0] for x in self.pranges[1:]]
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
-
-        if self.weighted:
-            logger.info('Using weights')
-            Warr = np.array_split(self.weights.T, indices, axis=1)
-            Xnew = []
-            for model, x, w in zip(self.models, Xarr, Warr):
-                w[w.sum(axis=1) < 1e-8] = 1e-8
-                Xnew.append(model.transform(x, weights=w))
-        else:
-            Xnew = [model.transform(x)
-                    for model, x in zip(self.models, Xarr)]
+        Xnew = [model.transform(x)
+                for model, x in zip(self.models, Xarr)]
         Xinv = [model.inverse_transform(x)
                 for model, x in zip(self.models, Xnew)]
-        # self.recon = np.concatenate([x.T for x in Xinv])
         self.recon = np.concatenate([x.T * self.variancearray[i, :]
                                      for i, x in enumerate(Xinv)])
+        # self.recon = np.concatenate([x.T for x in Xinv])
         # self.recon *= self.variancearray[:, np.newaxis]
 
         # # nseg = len(self.especeval)

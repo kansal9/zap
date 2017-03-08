@@ -1,25 +1,26 @@
 # ZAP - Zurich Atmosphere Purge
 #
-#    Copyright (c) 2016 Kurt Soto
+# Copyright (c) 2014-2016 Kurt Soto
+# Copyright (c) 2015-2017 Simon Conseil
 #
-#    Permission is hereby granted, free of charge, to any person obtaining
-#    a copy of this software and associated documentation files (the
-#    "Software"), to deal in the Software without restriction, including
-#    without limitation the rights to use, copy, modify, merge, publish,
-#    distribute, sublicense, and/or sell copies of the Software, and to permit
-#    persons to whom the Software is furnished to do so, subject to the
-#    following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to permit
+# persons to whom the Software is furnished to do so, subject to the
+# following conditions:
 #
-#    The above copyright notice and this permission notice shall be included in
-#    all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
-#    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#    DEALINGS IN THE SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 
 from __future__ import absolute_import, division, print_function
 
@@ -32,15 +33,10 @@ import sys
 
 from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel
 from astropy.io import fits
-from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.wcs import WCS
-from astropy.table import Table
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
 from numpy import nanmedian, nanmean
-# from numpy.random import randn
-# from scipy.interpolate import NearestNDInterpolator, griddata
-from scipy.ndimage import binary_dilation, generate_binary_structure
 from scipy.signal import fftconvolve
 from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
@@ -75,8 +71,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
             pevals=[], nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None, pca_class=None,
-            n_components=None, filter_lines=False):
+            interactive=False, ncpu=None, pca_class=None, n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -179,13 +174,12 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # twice the zlevel and continuumfilter steps.
         extSVD = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
                            clean=clean, zlevel=zlevel, cftype=cftype,
-                           cfwidth=cfwidthSVD, mask=mask,
-                           filter_lines=filter_lines)
+                           cfwidth=cfwidthSVD, mask=mask)
 
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               pevals=pevals, nevals=nevals, optimizeType=optimizeType,
-              extSVD=extSVD, filter_lines=filter_lines)
+              extSVD=extSVD)
 
     if interactive:
         # Return the zobj object without saving files
@@ -203,8 +197,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None, pca_class=None, n_components=None,
-              filter_lines=False):
+              ncpu=None, pca_class=None, n_components=None):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -242,7 +235,7 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
 
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
-                  cfwidth=cfwidth, mask=mask, filter_lines=filter_lines)
+                  cfwidth=cfwidth, mask=mask)
 
     # do the multiprocessed SVD calculation
     zobj._msvd()
@@ -480,7 +473,7 @@ class zclass(object):
 
     @timeit
     def _prepare(self, clean=True, zlevel='median', cftype='weight',
-                 cfwidth=100, extzlevel=None, mask=None, filter_lines=False):
+                 cfwidth=100, extzlevel=None, mask=None):
         logger.info('Preprocessing data')
 
         # Check for consistency between weighted median and zlevel keywords
@@ -508,16 +501,13 @@ class zclass(object):
         # remove the continuum level - this is multiprocessed to speed it up
         self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
 
-        if filter_lines:
-            self._linesfilter(filter_lines)
-
         # normalize the variance in the segments.
         self._normalize_variance()
 
     @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
              cfwidth=100, pevals=[], nevals=[], optimizeType='normal',
-             extSVD=None, filter_lines=False):
+             extSVD=None):
         """ Perform all zclass to ZAP a datacube:
 
         - NaN re/masking,
@@ -532,8 +522,7 @@ class zclass(object):
 
         """
         self._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
-                      cfwidth=cfwidth, extzlevel=extSVD,
-                      filter_lines=filter_lines)
+                      cfwidth=cfwidth, extzlevel=extSVD)
 
         # do the multiprocessed SVD calculation
         if extSVD is None:
@@ -677,169 +666,6 @@ class zclass(object):
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
         self.normstack = self.stack - self.contarray
-
-    @timeit
-    def _linesfilter(self, outfile, fsf=0.7, lsf=2.5, nsigma=4, max_area=500,
-                     max_nblobs=8):
-        logger.info('Cleaning emission lines, fsf_fwhm=%.2f, lsf_fwhm=%.2f, '
-                    'nsigma=%d', fsf, lsf, nsigma)
-        # Reconstruct a cube from the continuum filtered stack
-        cube = self.make_cube_from_stack(self.normstack, with_nans=True)
-        shape = cube.shape
-
-        # Mask edges by dilating the mask from the nan region
-        var = fits.getdata(self.musecubefits, ext=2)
-        cmask = np.isnan(cube) | np.isnan(var)
-        nanmask = np.sum(cmask, axis=0) > (0.25 * shape[0])
-        labels, nlabels = ndi.label(nanmask)
-        maxlabel = np.argmax([np.sum(labels == l)
-                              for l in range(1, nlabels+1)]) + 1
-        mask = binary_dilation(labels == maxlabel,
-                               structure=np.ones((3, 3), dtype=bool))
-        # cube[:, mask] = np.nan
-        cmask |= mask
-
-        # Normalize data
-        med = nanmedian(cube, axis=(1, 2))
-        cube -= med[:, np.newaxis, np.newaxis]
-        # cube /= np.sqrt(fits.getdata(self.musecubefits, ext=2))
-
-        cube[cmask] = 0.
-        var[cmask] = 0.
-
-        # Spectral convolution
-        logger.info('Running spectral convolution ...')
-        stddev = lsf / self.header['CD3_3'] * gaussian_fwhm_to_sigma
-        cube, var = zip(*parallel_map(
-            _iconv_spectral, cube.reshape(shape[0], -1), NCPU, axis=1,
-            stddev=stddev, split_arrays=[var.reshape(shape[0], -1)]))
-        cube = np.concatenate(cube, axis=1).reshape(shape)
-        var = np.concatenate(var, axis=1).reshape(shape)
-
-        # Spatial convolution
-        logger.info('Running spatial convolution ...')
-        cdelt = np.sqrt(self.header['CD1_1']**2 + self.header['CD1_2']**2)
-        stddev = fsf / (cdelt * 3600) * gaussian_fwhm_to_sigma
-        cube, var = zip(*parallel_map(_iconv_spatial, cube, NCPU, axis=0,
-                                      stddev=stddev, split_arrays=[var]))
-        cube = np.concatenate(cube, axis=0)
-        var = np.concatenate(var, axis=0)
-
-        var[cmask] = np.inf
-        np.sqrt(var, out=var)
-        cube /= var
-        fits.writeto('after-conv.fits', cube, header=self.header,
-                     overwrite=True)
-
-        cube[cmask] = np.nan
-        std = nsigma * mad_std(cube, axis=(1, 2))
-        cube[cmask] = 0.
-        mask = cube > std[:, np.newaxis, np.newaxis]
-
-        fits.writeto('before-opening.fits', mask.astype(np.uint8),
-                     header=self.header, overwrite=True)
-
-        logger.info('Running morphological opening ...')
-        # cube = grey_opening(cube, structure=np.expand_dims(circ, axis=0))
-        # cube = grey_opening(cube, structure=struct)
-        struct = ndi.iterate_structure(generate_binary_structure(3, 1), 2)
-        mask = ndi.binary_opening(mask, structure=struct[1:-1])
-        mask = binary_dilation(mask, structure=generate_binary_structure(3, 1))
-
-        fits.writeto('before-filter.fits', mask.astype(np.uint8),
-                     header=self.header, overwrite=True)
-
-        # logger.info('Dilating mask ...')
-        # struct = np.ones((5, 3, 3))
-        # mask = binary_dilation(mask, structure=struct, iterations=1)
-
-        logger.info('Filtering and filling blobs ...')
-        stats = []
-        cube = self.make_cube_from_stack(self.normstack)
-        cube[np.isnan(cube)] = 0.
-
-        for maskim, im in zip(mask, cube):
-            imlab, nl = ndi.label(maskim)
-            labels = list(range(1, nl+1))
-            areas = np.array([np.sum(imlab == l) for l in labels])
-            if nl > max_nblobs:
-                idx = np.argsort(areas)
-                labels = np.array(labels)[idx[:max_nblobs]]
-                areas = areas[idx[:max_nblobs]]
-                maskim[:] = np.logical_or.reduce([imlab == l for l in labels])
-
-            if areas.size == 0:
-                stats.append([0, 0, 0, 0, 0])
-            elif areas.size == 1:
-                area = areas[0]
-                stats.append([1, area, area, area, area])
-            else:
-                stats.append(
-                    [areas.size] +
-                    [f(areas) for f in (np.sum, np.min, np.max, np.median)])
-
-            if not self.weighted:
-                for label in labels:
-                    m = imlab == label
-                    sy, sx = ndi.find_objects(m)[0]
-                    ny, nx = (sy.stop - sy.start, sx.stop - sx.start)
-
-                    offy = 0 # - ny if sy.start > m.shape[0] // 2 else ny
-                    offx = - nx if sx.start > m.shape[1] // 2 else nx
-
-                    soffy = slice(sy.start + offy, sy.stop + offy)
-                    soffx = slice(sx.start + offx, sx.stop + offx)
-
-                    masked = m[sy, sx]
-                    im[sy, sx][masked] = im[soffy, soffx][masked]
-
-                    # margin = (sx.stop - sx.start)
-                    # sx = slice(max(0, sx.start - margin),
-                    #            min(sx.stop + margin, m.shape[0]))
-                    # margin = (sy.stop - sy.start)
-                    # sy = slice(max(0, sy.start - margin),
-                    #            min(sy.stop + margin, m.shape[1]))
-                    # masked = m[sy, sx]
-                    # notm = ~masked
-                    # data = im[sy, sx]
-                    # pos = np.mgrid[:masked.shape[0], :masked.shape[1]]
-                    # # interp = NearestNDInterpolator(pos[:, notm].T, data[notm])
-                    # # data[list(pos[:, masked])] = interp(pos[:, masked].T)
-                    # data[list(pos[:, masked])] = griddata(
-                    #     pos[:, notm].T, data[notm], pos[:, masked].T,
-                    #     method='cubic')
-
-                # for label in labels:
-                #     m = imlab == label
-                #     mneighbors = binary_dilation(m, structure=circ)
-                #     val = im[mneighbors ^ m]
-                #     im[m] = nanmedian(val) + randn(m.sum()) * mad_std(val)
-
-        if self.weighted:
-            var = fits.getdata(self.musecubefits, ext=2)
-            var[mask | cmask] = np.inf
-            self.weights = 1 / np.sqrt(var[:, self.y, self.x])
-
-        self.normstack = cube[:, self.y, self.x]
-        cube[self.nancube] = np.nan
-        fits.writeto('after-mask.fits', cube, header=self.header,
-                     overwrite=True)
-
-        nlabels, total, min_, max_, median = zip(*stats)
-        stats = Table(data=[nlabels, total, min_, max_,
-                            np.array(median, dtype=int)],
-                      names=['nblobs', 'masked_area', 'min_area', 'max_area',
-                             'median_area'])
-        logger.info('Done, masked %d blobs. Summary:', sum(nlabels))
-        for line in stats.info('stats', out=None).pformat():
-            logger.info(line)
-
-        with fits.open(self.musecubefits) as hdul:
-            hdul[1].data = mask.astype(np.uint8)
-            del hdul[2]
-            hdul.append(fits.table_to_hdu(stats))
-            hdul.writeto(outfile, clobber=True)
-            logger.info('Labels file saved to %s', outfile)
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""

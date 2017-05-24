@@ -1,25 +1,26 @@
 # ZAP - Zurich Atmosphere Purge
 #
-#    Copyright (c) 2016 Kurt Soto
+# Copyright (c) 2014-2016 Kurt Soto
+# Copyright (c) 2015-2017 Simon Conseil
 #
-#    Permission is hereby granted, free of charge, to any person obtaining
-#    a copy of this software and associated documentation files (the
-#    "Software"), to deal in the Software without restriction, including
-#    without limitation the rights to use, copy, modify, merge, publish,
-#    distribute, sublicense, and/or sell copies of the Software, and to permit
-#    persons to whom the Software is furnished to do so, subject to the
-#    following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to permit
+# persons to whom the Software is furnished to do so, subject to the
+# following conditions:
 #
-#    The above copyright notice and this permission notice shall be included in
-#    all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
-#    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#    DEALINGS IN THE SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 
 from __future__ import absolute_import, division, print_function
 
@@ -27,22 +28,27 @@ import astropy.units as u
 import logging
 import numpy as np
 import os
+import scipy.ndimage as ndi
 import sys
 
 from astropy.io import fits
 from astropy.wcs import WCS
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
-from scipy import ndimage as ndi
+from numpy import nanmedian, nanmean
 from scipy.stats import sigmaclip
+from sklearn.decomposition import PCA
 from time import time
 
 from .version import __version__
 
 # Limits of the segments in Angstroms
-SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+# SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+SKYSEG = [0, 10000]
+
 # Number of available CPUs
 NCPU = cpu_count()
+
 PY2 = sys.version_info[0] == 2
 
 if not PY2:
@@ -57,16 +63,14 @@ logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-###############################################################################
-################################### Top Level Functions #######################
-###############################################################################
+# ================= Top Level Functions =================
 
 
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
-            pevals=[], nevals=[], optimizeType='normal', extSVD=None,
+            nevals=[], optimizeType='normal', extSVD=None,
             skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None):
+            interactive=False, ncpu=None, pca_class=None, n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -103,18 +107,13 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     optimizeType : str
         Optimization method to compute the number of eigenspectra used for each
         segment: `none`, `normal` (default), `enhanced`. If `none`, the number
-        of eigenspectra must be specified with `nevals` or `pevals`, otherwise
+        of eigenspectra must be specified with `nevals`, otherwise
         `normal` is used.
-    pevals : list
-        Allow to specify the percentage of eigenspectra used for each segment.
-        If this is used, the pevals is ignored. Provide either a single value
-        that will be used for all of the segments, or a list of 11 values that
-        will be used for each of the segments.
     nevals : list
         Allow to specify the number of eigenspectra used for each segment.
-        If this is used, the pevals is ignored. Provide either a single value
-        that will be used for all of the segments, or a list of 11 values that
-        will be used for each of the segments.
+        Provide either a single value that will be used for all of the
+        segments, or a list of 11 values that will be used for each of the
+        segments.
     extSVD : str
         Path of an input FITS file containing a SVD computed by the
         :func:`~zap.SVDoutput` function. Otherwise the SVD is computed.
@@ -155,10 +154,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    # Check for consistency between weighted median and zlevel keywords
-    if cftype == 'weight' and zlevel == 'none':
-        raise ValueError('Weighted median requires a zlevel calculation')
-
     if optimizeType not in ('none', 'normal', 'enhanced'):
         raise ValueError('Invalid value for optimizeType')
 
@@ -171,24 +166,22 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        zsvd = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
-                         clean=clean, zlevel=zlevel, cftype=cftype,
-                         cfwidth=cfwidthSVD, mask=mask)
-        extSVD = svdoutputfits
+        extSVD = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
+                           clean=clean, zlevel=zlevel, cftype=cftype,
+                           cfwidth=cfwidthSVD, mask=mask)
 
-    zobj = zclass(musecubefits)
+    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
-              pevals=pevals, nevals=nevals, optimizeType=optimizeType,
-              extSVD=extSVD)
+              nevals=nevals, optimizeType=optimizeType, extSVD=extSVD)
 
     if interactive:
         # Return the zobj object without saving files
         return zobj
 
-    if zobj.run_zlevel != 'extSVD' and svdoutputfits is not None:
-        # Save SVD only if it was computed in _run, i.e. if an external SVD
-        # was not given
-        zobj.writeSVD(svdoutputfits=svdoutputfits)
+    # if zobj.run_zlevel != 'extSVD' and svdoutputfits is not None:
+    #     # Save SVD only if it was computed in _run, i.e. if an external SVD
+    #     # was not given
+    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
     if skycubefits is not None:
         zobj.writeskycube(skycubefits=skycubefits)
 
@@ -197,7 +190,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
               zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None):
+              ncpu=None, pca_class=None, n_components=None):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -233,39 +226,16 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    # Check for consistency between weighted median and zlevel keywords
-    if cftype == 'weight' and zlevel == 'none':
-        raise ValueError('Weighted median requires a zlevel calculation')
-
-    zobj = zclass(musecubefits)
-
-    # clean up the nan values
-    if clean:
-        zobj._nanclean()
-
-    # if mask is supplied, apply it
-    if mask is not None:
-        zobj._applymask(mask)
-
-    # Extract the spectra that we will be working with
-    zobj._extract()
-
-    # remove the median along the spectral axis
-    if zlevel.lower() != 'none':
-        zobj._zlevel(calctype=zlevel)
-
-    # remove the continuum level - this is multiprocessed to speed it up
-    zobj._continuumfilter(cftype=cftype, cfwidth=cfwidth)
-
-    # normalize the variance in the segments.
-    zobj._normalize_variance()
+    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
+    zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
+                  cfwidth=cfwidth, mask=mask)
 
     # do the multiprocessed SVD calculation
     zobj._msvd()
 
     # write to file
-    if svdoutputfits is not None:
-        zobj.writeSVD(svdoutputfits=svdoutputfits)
+    # if svdoutputfits is not None:
+    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
 
     return zobj
 
@@ -338,9 +308,7 @@ def timeit(func):
     return wrapped
 
 
-###############################################################################
-##################################### Process Steps ###########################
-###############################################################################
+# ================= Main class =================
 
 class zclass(object):
 
@@ -355,10 +323,6 @@ class zclass(object):
         A 2D array containing the subtracted continuum per spaxel.
     cube : numpy.ndarray
         The original cube with the zlevel subtraction performed per spaxel.
-    especeval : list of (eigenspectra, eval)
-        A list containing the full set of eigenspectra and eigenvalues
-        generated by the SVD calculation that is used toy reconstruct the
-        entire datacube.
     laxis : numpy.ndarray
         A 1d array containing the wavelength solution generated from the header
         parameters.
@@ -375,9 +339,6 @@ class zclass(object):
         reconstruct the residuals.
     normstack : numpy.ndarray
         A normalized version of the datacube decunstructed into a 2d array.
-    varlist : numpy.ndarray
-        An array for each segment with the variance curve, calculated for the
-        optimize method.
     pranges : numpy.ndarray
         The pixel indices of the bounding regions for each spectral segment.
     recon : numpy.ndarray
@@ -388,9 +349,6 @@ class zclass(object):
         Boolean indicating that the zero level correction was used.
     stack : numpy.ndarray
         The datacube deconstructed into a 2d array for use in the the SVD.
-    subespeceval : list of (eigenspectra, eval)
-        The subset of eigenvalues and eigenspectra used to reconstruct the sky
-        residuals.
     variancearray : numpy.ndarray
         A list of length nsegments containing variances calculated per spaxel
         used for normalization
@@ -402,18 +360,17 @@ class zclass(object):
 
     """
 
-    def __init__(self, musecubefits):
+    def __init__(self, musecubefits, pca_class=None, n_components=None):
         """ Initialization of the zclass.
 
         Pulls the datacube into the class and trims it based on the known
         optimal spectral range of MUSE.
 
         """
-        hdu = fits.open(musecubefits)
-        self.cube = hdu[1].data
-        self.header = hdu[1].header
         self.musecubefits = musecubefits
-        hdu.close()
+        with fits.open(musecubefits) as hdul:
+            self.cube = hdul[1].data
+            self.header = hdul[1].header
 
         # Workaround for floating points errors in wcs computation: if cunit is
         # specified, wcslib will convert in meters instead of angstroms, so we
@@ -474,18 +431,54 @@ class zclass(object):
         self.pranges = np.array(pranges)
 
         # eigenspace Subset
-        self.especeval = []
-        self.subespeceval = []
+        if pca_class is not None:
+            logger.info('Using %s', pca_class)
+            self.pca_class = pca_class
+        else:
+            logger.info("Using scikit-learn's PCA")
+            self.pca_class = PCA
 
         # Reconstruction of sky features
+        self.n_components = n_components
         self.recon = None
         self.cleancube = None
-        self.varlist = None  # container for variance curves
+
+    @timeit
+    def _prepare(self, clean=True, zlevel='median', cftype='weight',
+                 cfwidth=100, extzlevel=None, mask=None):
+        logger.info('Preprocessing data')
+
+        # Check for consistency between weighted median and zlevel keywords
+        if cftype == 'weight' and zlevel == 'none':
+            raise ValueError('Weighted median requires a zlevel calculation')
+
+        # clean up the nan values
+        if clean:
+            self._nanclean()
+
+        # if mask is supplied, apply it
+        if mask is not None:
+            self._applymask(mask)
+
+        # Extract the spectra that we will be working with
+        self._extract()
+
+        # remove the median along the spectral axis
+        if extzlevel is None:
+            if zlevel.lower() != 'none':
+                self._zlevel(calctype=zlevel)
+        else:
+            self._externalzlevel(extzlevel)
+
+        # remove the continuum level - this is multiprocessed to speed it up
+        self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
+
+        # normalize the variance in the segments.
+        self._normalize_variance()
 
     @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
-             cfwidth=100, pevals=[], nevals=[], optimizeType='normal',
-             extSVD=None):
+             cfwidth=100, nevals=[], optimizeType='normal', extSVD=None):
         """ Perform all zclass to ZAP a datacube:
 
         - NaN re/masking,
@@ -499,43 +492,25 @@ class zclass(object):
         - data cube reconstruction.
 
         """
-        logger.info('Running ZAP %s !', __version__)
-
-        self.optimizeType = optimizeType
-
-        # clean up the nan values
-        if clean:
-            self._nanclean()
-
-        # Extract the spectra that we will be working with
-        self._extract()
-
-        # remove the median along the spectral axis
-        if extSVD is None:
-            if zlevel.lower() != 'none':
-                self._zlevel(calctype=zlevel)
-        else:
-            self._externalzlevel(extSVD)
-
-        # remove the continuum level - this is multiprocessed to speed it up
-        self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
-
-        # normalize the variance in the segments.
-        self._normalize_variance()
+        self._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
+                      cfwidth=cfwidth, extzlevel=extSVD)
 
         # do the multiprocessed SVD calculation
         if extSVD is None:
             self._msvd()
         else:
-            self._externalSVD(extSVD)
+            # self._externalSVD(extSVD)
+            self.models = extSVD.models
+
+        self.components = [m.components_.copy() for m in self.models]
 
         # choose some fraction of eigenspectra or some finite number of
         # eigenspectra
-        if optimizeType != 'none' or (nevals == [] and pevals == []):
+        if optimizeType != 'none' or nevals == []:
             self.optimize()
             self.chooseevals(nevals=self.nevals)
         else:
-            self.chooseevals(pevals=pevals, nevals=nevals)
+            self.chooseevals(nevals=nevals)
 
         # reconstruct the sky residuals using the subset of eigenspace
         self.reconstruct()
@@ -580,10 +555,11 @@ class zclass(object):
         logger.info('Using external zlevel from %s', extSVD)
         if isinstance(extSVD, zclass):
             self.zlsky = np.array(extSVD.zlsky, copy=True)
+            self.run_zlevel = extSVD.run_zlevel
         else:
             self.zlsky = fits.getdata(extSVD, 0)
+            self.run_zlevel = 'extSVD'
         self.stack -= self.zlsky[:, np.newaxis]
-        self.run_zlevel = 'extSVD'
 
     @timeit
     def _zlevel(self, calctype='median'):
@@ -622,6 +598,7 @@ class zclass(object):
         else:
             logger.info('Skipping zlevel subtraction')
 
+    @timeit
     def _continuumfilter(self, cfwidth=100, cftype='weight'):
         """ A multiprocessed implementation of the continuum removal.
 
@@ -636,36 +613,43 @@ class zclass(object):
             removed
 
         """
-        logger.info('Applying Continuum Filter, cfwidth=%d', cfwidth)
-        if cftype not in ('weight', 'median', 'none'):
-            raise ValueError("cftype must be 'weight' or 'median', got {}"
-                             .format(cftype))
+        logger.info('Applying Continuum Filter, cftype=%s, cfwidth=%d',
+                    cftype, cfwidth)
+        if cftype not in ('weight', 'median', 'fit', 'none'):
+            raise ValueError("cftype must be weight, median, fit or none, "
+                             "got {}".format(cftype))
         self._cftype = cftype
         self._cfwidth = cfwidth
 
-        if cftype == 'median':
-            weight = None
-        elif cftype == 'weight':
+        weight = None
+        if cftype == 'weight':
             weight = np.abs(self.zlsky - (np.max(self.zlsky) + 1))
 
         # remove continuum features
         if cftype == 'none':
             self.contarray = np.zeros_like(self.stack)
-            self.normstack = self.stack.copy()
+        elif cftype == 'fit':
+            x = np.arange(self.stack.shape[0])
+            res = np.polynomial.polynomial.polyfit(x, self.stack, deg=5)
+            ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
+            self.contarray = ret.T
         else:
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
-            self.normstack = self.stack - self.contarray
+        self.normstack = self.stack - self.contarray
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
-        self.variancearray = np.std(self.stack, axis=1)
-        self.normstack /= self.variancearray[:, np.newaxis]
-        # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
-        # for i in range(nseg):
-        #     pmin, pmax = self.pranges[i]
-        #     var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
-        #     self.normstack[pmin:pmax, :] /= var[i, :]
+        logger.info('Normalizing variances')
+        # self.variancearray = np.std(self.stack, axis=1)
+        # self.normstack /= self.variancearray[:, np.newaxis]
+
+        nseg = len(self.pranges)
+        self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
+        for i in range(nseg):
+            pmin, pmax = self.pranges[i]
+            var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
+            self.normstack[pmin:pmax, :] /= var[i, :]
 
     @timeit
     def _msvd(self):
@@ -677,9 +661,21 @@ class zclass(object):
         """
         logger.info('Calculating SVD on %d segments', len(self.pranges))
         indices = [x[0] for x in self.pranges[1:]]
-        self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
+        # normstack = self.stack - self.contarray
+        Xarr = np.array_split(self.normstack.T, indices, axis=1)
 
-    def chooseevals(self, nevals=[], pevals=[]):
+        self.models = []
+        for i, x in enumerate(Xarr):
+            if self.n_components is not None:
+                ncomp = max(x.shape[1]*self.n_components, 60)
+                logger.info('Segment %d, computing %d eigenvectors out of %d',
+                            i, ncomp, x.shape[1])
+            else:
+                ncomp = None
+
+            self.models.append(self.pca_class(n_components=ncomp).fit(x))
+
+    def chooseevals(self, nevals=[]):
         """ Choose the number of eigenspectra/evals to use for reconstruction.
 
         User supplies the number of eigen spectra to be used (neval) or the
@@ -690,16 +686,8 @@ class zclass(object):
         or provide an array that defines neval or peval per segment.
 
         """
-        nranges = len(self.especeval)
+        nranges = len(self.pranges)
         nevals = np.atleast_1d(nevals)
-        pevals = np.atleast_1d(pevals)
-        nespec = np.array([self.especeval[i][0].shape[1]
-                           for i in range(nranges)])
-
-        # deal with no selection
-        if len(nevals) == 0 and len(pevals) == 0:
-            logger.info('Number of modes not selected')
-            nevals = np.array([1])
 
         # deal with an input list
         if len(nevals) > 1:
@@ -710,22 +698,7 @@ class zclass(object):
             else:
                 logger.info('Choosing %s eigenspectra for segments', nevals)
 
-        if len(pevals) > 1:
-            if len(pevals) != nranges:
-                pevals = np.array([pevals[0]])
-                logger.info('Chosen eigenspectra array does not correspond to '
-                            'number of segments')
-            else:
-                logger.info('Choosing %s%% of eigenspectra for segments',
-                            pevals)
-                nevals = (pevals * nespec / 100.).round().astype(int)
-
-        # deal with single value entries
-        if len(pevals) == 1:
-            logger.info('Choosing %s%% of eigenspectra for all segments',
-                        pevals)
-            nevals = (pevals * nespec / 100.).round().astype(int)
-        elif len(nevals) == 1:
+        if len(nevals) == 1:
             logger.info('Choosing %s eigenspectra for all segments', nevals)
             nevals = np.zeros(nranges, dtype=int) + nevals
 
@@ -735,16 +708,9 @@ class zclass(object):
         else:
             start, end = nevals.T
 
-        # take subset of the eigenspectra and put them in a list
-        subespeceval = []
-        for i in range(nranges):
-            eigenspectra, evals = self.especeval[i]
-            tevals = (evals[start[i]:end[i], :]).copy()
-            teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
-            subespeceval.append((teigenspectra, tevals))
-
-        self.subespeceval = subespeceval
         self.nevals = nevals
+        for i, model in enumerate(self.models):
+                model.components_ = self.components[i][start[i]:end[i]]
 
     @timeit
     def reconstruct(self):
@@ -753,39 +719,43 @@ class zclass(object):
         """
 
         logger.info('Reconstructing Sky Residuals')
-        # nseg = len(self.especeval)
-        rec = [(eig[:, :, np.newaxis] * ev[np.newaxis, :, :]).sum(axis=1)
-               for eig, ev in self.subespeceval]
 
-        # rescale to correct variance
-        # for i in range(nseg):
-        #     rec[i] *= self.variancearray[i, :]
-        self.recon = np.concatenate(rec)
-        self.recon *= self.variancearray[:, np.newaxis]
+        indices = [x[0] for x in self.pranges[1:]]
+        # normstack = self.stack - self.contarray
+        Xarr = np.array_split(self.normstack.T, indices, axis=1)
+        Xnew = [model.transform(x)
+                for model, x in zip(self.models, Xarr)]
+        Xinv = [model.inverse_transform(x)
+                for model, x in zip(self.models, Xnew)]
+        self.recon = np.concatenate([x.T * self.variancearray[i, :]
+                                     for i, x in enumerate(Xinv)])
+        # self.recon = np.concatenate([x.T for x in Xinv])
+        # self.recon *= self.variancearray[:, np.newaxis]
 
-    # stuff the stack back into a cube
+    def make_cube_from_stack(self, stack, with_nans=False):
+        """Stuff the stack back into a cube."""
+        cube = self.cube.copy()
+        cube[:, self.y, self.x] = stack
+        if with_nans:
+            cube[self.nancube] = np.nan
+        return cube
+
     def remold(self):
         """ Subtracts the reconstructed residuals and places the cleaned
         spectra into the duplicated datacube.
         """
         logger.info('Applying correction and reshaping data product')
-        self.cleancube = self.cube.copy()
-        self.cleancube[:, self.y, self.x] = self.stack - self.recon
-        if self.run_clean:
-            self.cleancube[self.nancube] = np.nan
+        self.cleancube = self.make_cube_from_stack(self.stack - self.recon,
+                                                   with_nans=self.run_clean)
 
-    # redo the residual reconstruction with a different set of parameters
-    def reprocess(self, pevals=[], nevals=[]):
-        """
-        A method that redoes the eigenvalue selection, reconstruction, and
+    def reprocess(self, nevals=[]):
+        """ A method that redoes the eigenvalue selection, reconstruction, and
         remolding of the data.
         """
-
-        self.chooseevals(pevals=pevals, nevals=nevals)
+        self.chooseevals(nevals=nevals)
         self.reconstruct()
         self.remold()
 
-    @timeit
     def optimize(self):
         """ Function to optimize the number of components used to characterize
         the residuals.
@@ -797,60 +767,29 @@ class zclass(object):
         removal of astronomical features rather than emission line residuals.
 
         """
-        logger.info('Optimizing')
+        logger.info('Compute number of components')
+        ncomp = []
+        for model in self.models:
+            var = model.explained_variance_
+            deriv, mn1, std1 = _compute_deriv(var)
+            cross = np.append([False], deriv >= (mn1 - std1))
 
-        normstack = self.stack - self.contarray
-        nseg = len(self.especeval)
-        self.nevals = np.zeros(nseg, dtype=int)
-        indices = [x[0] for x in self.pranges[1:]]
+            # if self.optimizeType != 'enhanced':
+            #     # look for crossing points. When they get within 1 sigma of
+            #     # mean in settled region.
+            #     # pad by 1 for 1st deriv
+            #     cross1 = np.append([False], deriv >= (mn1 - std1))
+            #     # pad by 2 for 2nd
+            #     cross2 = np.append([False, False],
+            #                        np.abs(deriv2) <= (mn2 + std2))
+            #     cross = np.logical_or(cross1, cross2)
+            # else:
+            #     # pad by 1 for 1st deriv
+            #     cross = np.append([False], deriv >= (mn1 - std1))
 
-        varchunks = np.array_split(self.variancearray, indices)
-        self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
-                                    especeval=self.especeval,
-                                    variancearray=varchunks)
+            ncomp.append(np.where(cross)[0][0])
 
-        if self.optimizeType == 'enhanced':
-            logger.info('Enhanced Optimization')
-        else:
-            logger.info('Normal Optimization')
-
-        for i in range(nseg):
-            # optimize
-            varlist = self.varlist[i]
-            deriv = varlist[1:] - varlist[:-1]
-            deriv2 = deriv[1:] - deriv[:-1]
-            noptpix = varlist.size
-
-            if self.optimizeType != 'enhanced':
-                # statistics on the derivatives
-                ind = int(.5 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std() * 2
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std() * 2
-                # look for crossing points. When they get within 1 sigma of
-                # mean in settled region.
-                # pad by 1 for 1st deriv
-                cross1 = np.append([False], deriv >= (mn1 - std1))
-                # pad by 2 for 2nd
-                cross2 = np.append([False, False],
-                                   np.abs(deriv2) <= (mn2 + std2))
-                cross = np.logical_or(cross1, cross2)
-            else:
-                # statistics on the derivatives
-                ind = int(.75 * (noptpix - 2))
-                mn1 = deriv[ind:].mean()
-                std1 = deriv[ind:].std()
-                mn2 = deriv2[ind:].mean()
-                std2 = deriv2[ind:].std()
-                # pad by 1 for 1st deriv
-                cross = np.append([False], deriv >= (mn1 - std1))
-
-            self.nevals[i] = np.where(cross)[0][0]
-
-    # #########################################################################
-    # #################################### Extra Functions ####################
-    # #########################################################################
+        self.nevals = np.array(ncomp)
 
     def make_contcube(self):
         """ Remold the continuum array so it can be investigated.
@@ -861,22 +800,22 @@ class zclass(object):
         contcube[:, self.y, self.x] = self.contarray
         return contcube
 
-    def _externalSVD(self, extSVD):
-        logger.info('Calculating eigenvalues for input eigenspectra')
-        nseg = len(self.pranges)
+    # def _externalSVD(self, extSVD):
+    #     logger.info('Calculating eigenvalues for input eigenspectra')
+    #     nseg = len(self.pranges)
 
-        if isinstance(extSVD, zclass):
-            eigenspectra = [esp[0] for esp in extSVD.especeval]
-        else:
-            with fits.open(extSVD) as hdulist:
-                eigenspectra = [hdu.data for hdu in hdulist[1:]]
+    #     if isinstance(extSVD, zclass):
+    #         eigenspectra = [esp[0] for esp in extSVD.especeval]
+    #     else:
+    #         with fits.open(extSVD) as hdulist:
+    #             eigenspectra = [hdu.data for hdu in hdulist[1:]]
 
-        self.especeval = especeval = []
-        for i in range(nseg):
-            pmin, pmax = self.pranges[i]
-            ns = self.normstack[pmin:pmax]
-            evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
-            especeval.append([eigenspectra[i], evals])
+    #     self.especeval = especeval = []
+    #     for i in range(nseg):
+    #         pmin, pmax = self.pranges[i]
+    #         ns = self.normstack[pmin:pmax]
+    #         evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
+    #         especeval.append([eigenspectra[i], evals])
 
     def _applymask(self, mask):
         """Apply a mask to the input data to provide a cleaner basis set.
@@ -894,10 +833,6 @@ class zclass(object):
         logger.info('Masking %d pixels (%d%%)', nmasked,
                     nmasked / np.prod(mask.shape) * 100)
         self.cube[:, mask] = np.nan
-
-    ###########################################################################
-    ##################################### Output Functions ####################
-    ###########################################################################
 
     def writecube(self, outcubefits='DATACUBE_ZAP.fits'):
         """Write the processed datacube to an individual fits file."""
@@ -937,72 +872,49 @@ class zclass(object):
         hdu.close()
         logger.info('Cube file saved to %s', outcubefits)
 
-    def writeSVD(self, svdoutputfits='ZAP_SVD.fits'):
-        """Write the SVD to an individual fits file."""
+    # def writeSVD(self, svdoutputfits='ZAP_SVD.fits'):
+    #     """Write the SVD to an individual fits file."""
 
-        check_file_exists(svdoutputfits)
-        header = fits.Header()
-        header['ZAPvers'] = (__version__, 'ZAP version')
-        header['ZAPzlvl'] = (self.run_zlevel, 'ZAP zero level correction')
-        header['ZAPclean'] = (self.run_clean,
-                              'ZAP NaN cleaning performed for calculation')
-        header['ZAPcftyp'] = (self._cftype, 'ZAP continuum filter type')
-        header['ZAPcfwid'] = (self._cfwidth, 'ZAP continuum filter size')
-        header['ZAPmask'] = (self.maskfile, 'ZAP mask used to remove sources')
-        nseg = len(self.pranges)
-        header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
+    #     check_file_exists(svdoutputfits)
+    #     header = fits.Header()
+    #     header['ZAPvers'] = (__version__, 'ZAP version')
+    #     header['ZAPzlvl'] = (self.run_zlevel, 'ZAP zero level correction')
+    #     header['ZAPclean'] = (self.run_clean,
+    #                           'ZAP NaN cleaning performed for calculation')
+    #     header['ZAPcftyp'] = (self._cftype, 'ZAP continuum filter type')
+    #     header['ZAPcfwid'] = (self._cfwidth, 'ZAP continuum filter size')
+    #     header['ZAPmask'] = (self.maskfile, 'ZAP mask used to remove sources')
+    #     nseg = len(self.pranges)
+    #     header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
 
-        hdu = fits.HDUList([fits.PrimaryHDU(self.zlsky)])
-        for i in range(len(self.pranges)):
-            hdu.append(fits.ImageHDU(self.especeval[i][0]))
-        # write for later use
-        hdu.writeto(svdoutputfits)
-        logger.info('SVD file saved to %s', svdoutputfits)
+    #     hdu = fits.HDUList([fits.PrimaryHDU(self.zlsky)])
+    #     for i in range(len(self.pranges)):
+    #         hdu.append(fits.ImageHDU(self.especeval[i][0]))
+    #     # write for later use
+    #     hdu.writeto(svdoutputfits)
+    #     logger.info('SVD file saved to %s', svdoutputfits)
 
     def plotvarcurve(self, i=0, ax=None):
-        if len(self.varlist) == 0:
-            logger.warning('No varlist found. The optimize method must be '
-                           'run first.')
-            return
-
-        # optimize
-        deriv = (np.roll(self.varlist[i], -1) - self.varlist[i])[:-1]
-        deriv2 = (np.roll(deriv, -1) - deriv)[:-1]
-        noptpix = self.varlist[i].size
-
-        if self.optimizeType == 'normal':
-            # statistics on the derivatives
-            mn1 = deriv[.5 * (noptpix - 2):].mean()
-            std1 = deriv[.5 * (noptpix - 2):].std() * 2
-            mn2 = deriv2[.5 * (noptpix - 2):].mean()
-            std2 = deriv2[.5 * (noptpix - 2):].std() * 2
-        else:
-            # statistics on the derivatives
-            mn1 = deriv[.75 * (noptpix - 2):].mean()
-            std1 = deriv[.75 * (noptpix - 2):].std()
-            mn2 = deriv2[.75 * (noptpix - 2):].mean()
-            std2 = deriv2[.75 * (noptpix - 2):].std()
+        var = self.models[i].explained_variance_
+        deriv, mn1, std1 = _compute_deriv(var)
 
         if ax is None:
             import matplotlib.pyplot as plt
             fig, ax = plt.subplots(3, 1, figsize=[10, 15])
 
         ax1, ax2, ax3 = ax
-        ax1.plot(self.varlist[i], linewidth=3)
-        ax1.plot([self.nevals[i], self.nevals[i]],
-                 [min(self.varlist[i]), max(self.varlist[i])])
+        ax1.plot(var, linewidth=3)
+        ax1.plot([self.nevals[i], self.nevals[i]], [min(var), max(var)])
         ax1.set_ylabel('Variance')
 
         ax2.plot(np.arange(deriv.size), deriv)
-        ax2.plot([0, len(deriv)], [mn1, mn1], 'k')
-        ax2.plot([0, len(deriv)], [mn1 - std1, mn1 - std1], '0.5')
+        ax2.hlines([mn1, mn1-std1], 0, len(deriv), colors=('k', '0.5'))
         ax2.plot([self.nevals[i] - 1, self.nevals[i] - 1],
                  [min(deriv), max(deriv)])
         ax2.set_ylabel('d/dn Var')
 
+        deriv2 = np.diff(deriv)
         ax3.plot(np.arange(deriv2.size), np.abs(deriv2))
-        ax3.plot([0, len(deriv2)], [mn2, mn2], 'k')
-        ax3.plot([0, len(deriv2)], [mn2 + std2, mn2 + std2], '0.5')
         ax3.plot([self.nevals[i] - 2, self.nevals[i] - 2],
                  [min(deriv2), max(deriv2)])
         ax3.set_ylabel('(d^2/dn^2) Var')
@@ -1011,10 +923,16 @@ class zclass(object):
         ax1.set_title('Segment {0}, {1} - {2} Angstroms'.format(
             i, self.lranges[i][0], self.lranges[i][1]))
 
+    def plotvarcurves(self):
+        nseg = len(self.models)
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(nseg, 3, figsize=(16, nseg*2),
+                                 tight_layout=True)
+        for i in range(nseg):
+            self.plotvarcurve(i=i, ax=axes[i])
 
-###############################################################################
-##################################### Helper Functions ########################
-###############################################################################
+
+# ================= Helper Functions =================
 
 
 def worker(f, i, chunk, out_q, err_q, kwargs):
@@ -1031,14 +949,24 @@ def worker(f, i, chunk, out_q, err_q, kwargs):
 def parallel_map(func, arr, indices, **kwargs):
     logger.debug('Running function %s with indices: %s',
                  func.__name__, indices)
+    axis = kwargs.pop('axis', None)
+    if isinstance(indices, (int, np.integer)) and indices == 1:
+        return [func(0, arr, **kwargs)]
+
     manager = Manager()
     out_q = manager.Queue()
     err_q = manager.Queue()
     jobs = []
-    axis = kwargs.pop('axis', None)
     chunks = np.array_split(arr, indices, axis=axis)
+    if 'split_arrays' in kwargs:
+        split_arrays = [np.array_split(a, indices, axis=axis)
+                        for a in kwargs.pop('split_arrays')]
+    else:
+        split_arrays = None
 
     for i, chunk in enumerate(chunks):
+        if split_arrays:
+            kwargs['split_arrays'] = [s[i] for s in split_arrays]
         p = Process(target=worker, args=(func, i, chunk, out_q, err_q, kwargs))
         jobs.append(p)
         p.start()
@@ -1061,9 +989,46 @@ def parallel_map(func, arr, indices, **kwargs):
     return results
 
 
-##### Continuum Filtering #####
+def _compute_deriv(arr, nsigma=5):
+    """Compute statistics on the derivatives"""
+    deriv = np.diff(arr)
+    ind = int(.15 * arr.size)
+    mn1 = deriv[ind:].mean()
+    std1 = deriv[ind:].std() * nsigma
+    return deriv, mn1, std1
 
-@timeit
+
+def median_absolute_deviation(a, axis=None):
+    """Calculate the median absolute deviation (MAD).
+
+    Copied from Astropy to allow use np.nanmedian which is much faster here.
+
+    """
+
+    a = np.asanyarray(a)
+    a_median = nanmedian(a, axis=axis)
+
+    # broadcast the median array before subtraction
+    if axis is not None:
+        if isinstance(axis, (tuple, list)):
+            for ax in sorted(axis):
+                a_median = np.expand_dims(a_median, axis=ax)
+        else:
+            a_median = np.expand_dims(a_median, axis=axis)
+
+    return nanmedian(np.abs(a - a_median), axis=axis)
+
+
+def mad_std(data, axis=None):
+    """Calculate a robust standard deviation using the MAD.
+
+    Copied from Astropy to allow use np.nanmedian which is much faster here.
+
+    """
+    # NOTE: 1. / scipy.stats.norm.ppf(0.75) = 1.482602218505602
+    return median_absolute_deviation(data, axis=axis) * 1.482602218505602
+
+
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
     if cftype == 'median':
         func = _icfmedian
@@ -1148,64 +1113,6 @@ def wmedian(spec, wt, cfwidth=100):
     return wmed
 
 
-# ### SVD #####
-
-def _isvd(i, normstack):
-    """
-    Perform single value decomposition and Calculate PC amplitudes (projection)
-    outputs are eigenspectra operates on a 2D array.
-
-    eigenspectra = [nbins, naxes]
-    evals = [naxes, nobj]
-    data = [nbins, nobj]
-    """
-
-    inormstack = normstack.T
-    U, s, V = np.linalg.svd(inormstack, full_matrices=0)
-    eigenspectra = np.transpose(V)
-    evals = inormstack.dot(eigenspectra)
-    logger.info('Finished SVD Segment %d', i)
-    return [eigenspectra, evals.T]
-
-
-# ### OPTIMIZE #####
-
-
-def _ivarcurve(i, istack, especeval=None, variancearray=None):
-    """
-    Reconstruct the residuals from a given set of eigenspectra and eigenvalues.
-
-    this is a special version for caculating the variance curve. It adds the
-    contribution of a single mode to an existing reconstruction.
-
-    """
-
-    iprecon = np.zeros_like(istack)
-    eigenspectra, evals = especeval[i]
-    variance = variancearray[i]
-    ivarlist = []
-    totalnevals = int(np.round(evals.shape[0] * 0.25))
-
-    progress_step = int(totalnevals * .2)
-    to_percent = 100. / (totalnevals - 1.)
-    info = logger.info
-
-    for nevals in range(totalnevals):
-        if nevals and (nevals % progress_step) == 0:
-            info('Seg %d: %d%% complete ', i, int(nevals * to_percent))
-
-        eig = eigenspectra[:, nevals]
-        ev = evals[nevals, :]
-        # broadcast evals on evects and sum
-        iprecon += (eig[:, np.newaxis] * ev[np.newaxis, :])
-
-        icleanstack = istack - (iprecon * variance[:, np.newaxis])
-        # calculate the variance on the cleaned segment
-        ivarlist.append(np.var(icleanstack))
-
-    return np.array(ivarlist)
-
-
 def _newheader(zobj):
     """Put the pertinent zap parameters into the header"""
     header = zobj.header.copy()
@@ -1288,6 +1195,5 @@ def _nanclean(cube, rejectratio=0.25, boxsz=1):
                 neighbor[outsider, icounter] = np.nan
                 icounter = icounter + 1
 
-    mn = np.ma.masked_invalid(neighbor)
-    cleancube[z, y, x] = mn.mean(axis=1).filled(np.nan)
+    cleancube[z, y, x] = nanmean(neighbor, axis=1)
     return cleancube, badcube

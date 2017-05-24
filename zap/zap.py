@@ -43,7 +43,8 @@ from time import time
 from .version import __version__
 
 # Limits of the segments in Angstroms
-SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+# SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+SKYSEG = [0, 10000]
 
 # Number of available CPUs
 NCPU = cpu_count()

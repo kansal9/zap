@@ -171,9 +171,9 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
-                  clean=clean, zlevel=zlevel, cftype=cftype,
-                  cfwidth=cfwidthSVD, mask=mask)
+        zsvd = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
+                         clean=clean, zlevel=zlevel, cftype=cftype,
+                         cfwidth=cfwidthSVD, mask=mask)
         extSVD = svdoutputfits
 
     zobj = zclass(musecubefits)
@@ -257,11 +257,17 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     # remove the continuum level - this is multiprocessed to speed it up
     zobj._continuumfilter(cftype=cftype, cfwidth=cfwidth)
 
+    # normalize the variance in the segments.
+    zobj._normalize_variance()
+
     # do the multiprocessed SVD calculation
     zobj._msvd()
 
     # write to file
-    zobj.writeSVD(svdoutputfits=svdoutputfits)
+    if svdoutputfits is not None:
+        zobj.writeSVD(svdoutputfits=svdoutputfits)
+
+    return zobj
 
 
 def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
@@ -514,6 +520,9 @@ class zclass(object):
         # remove the continuum level - this is multiprocessed to speed it up
         self._continuumfilter(cfwidth=cfwidth, cftype=cftype)
 
+        # normalize the variance in the segments.
+        self._normalize_variance()
+
         # do the multiprocessed SVD calculation
         if extSVD is None:
             self._msvd()
@@ -568,8 +577,11 @@ class zclass(object):
 
     def _externalzlevel(self, extSVD):
         """Remove the zero level from the extSVD file."""
-        logger.info('Using external zlevel')
-        self.zlsky = fits.getdata(extSVD, 0)
+        logger.info('Using external zlevel from %s', extSVD)
+        if isinstance(extSVD, zclass):
+            self.zlsky = np.array(extSVD.zlsky, copy=True)
+        else:
+            self.zlsky = fits.getdata(extSVD, 0)
         self.stack -= self.zlsky[:, np.newaxis]
         self.run_zlevel = 'extSVD'
 
@@ -645,27 +657,25 @@ class zclass(object):
                                               weight=weight, cfwidth=cfwidth)
             self.normstack = self.stack - self.contarray
 
+    def _normalize_variance(self):
+        """Normalize the variance in the segments."""
+        self.variancearray = np.std(self.stack, axis=1)
+        self.normstack /= self.variancearray[:, np.newaxis]
+        # self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
+        # for i in range(nseg):
+        #     pmin, pmax = self.pranges[i]
+        #     var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
+        #     self.normstack[pmin:pmax, :] /= var[i, :]
+
     @timeit
     def _msvd(self):
         """ Multiprocessed singular value decomposition.
 
-        First the normstack is normalized per segment per spaxel by the
-        variance.  Takes the normalized, spectral segments and distributes them
+        Takes the normalized, spectral segments and distributes them
         to the individual svd methods.
 
         """
-        logger.info('Calculating SVD')
-
-        # normalize the variance in the segments
-        nseg = len(self.pranges)
-        self.variancearray = var = np.zeros((nseg, self.stack.shape[1]))
-
-        for i in range(nseg):
-            pmin, pmax = self.pranges[i]
-            var[i, :] = np.var(self.normstack[pmin:pmax, :], axis=0)
-            self.normstack[pmin:pmax, :] /= var[i, :]
-
-        logger.debug('Beginning SVD on %d segments', nseg)
+        logger.info('Calculating SVD on %d segments', len(self.pranges))
         indices = [x[0] for x in self.pranges[1:]]
         self.especeval = parallel_map(_isvd, self.normstack, indices, axis=0)
 
@@ -719,12 +729,18 @@ class zclass(object):
             logger.info('Choosing %s eigenspectra for all segments', nevals)
             nevals = np.zeros(nranges, dtype=int) + nevals
 
+        if nevals.ndim == 1:
+            start = np.zeros(nranges, dtype=int)
+            end = nevals
+        else:
+            start, end = nevals.T
+
         # take subset of the eigenspectra and put them in a list
         subespeceval = []
         for i in range(nranges):
             eigenspectra, evals = self.especeval[i]
-            tevals = (evals[0:nevals[i], :]).copy()
-            teigenspectra = (eigenspectra[:, 0:nevals[i]]).copy()
+            tevals = (evals[start[i]:end[i], :]).copy()
+            teigenspectra = (eigenspectra[:, start[i]:end[i]]).copy()
             subespeceval.append((teigenspectra, tevals))
 
         self.subespeceval = subespeceval
@@ -737,14 +753,15 @@ class zclass(object):
         """
 
         logger.info('Reconstructing Sky Residuals')
-        nseg = len(self.especeval)
+        # nseg = len(self.especeval)
         rec = [(eig[:, :, np.newaxis] * ev[np.newaxis, :, :]).sum(axis=1)
                for eig, ev in self.subespeceval]
 
         # rescale to correct variance
-        for i in range(nseg):
-            rec[i] *= self.variancearray[i, :]
+        # for i in range(nseg):
+        #     rec[i] *= self.variancearray[i, :]
         self.recon = np.concatenate(rec)
+        self.recon *= self.variancearray[:, np.newaxis]
 
     # stuff the stack back into a cube
     def remold(self):
@@ -786,9 +803,11 @@ class zclass(object):
         nseg = len(self.especeval)
         self.nevals = np.zeros(nseg, dtype=int)
         indices = [x[0] for x in self.pranges[1:]]
+
+        varchunks = np.array_split(self.variancearray, indices)
         self.varlist = parallel_map(_ivarcurve, normstack, indices, axis=0,
                                     especeval=self.especeval,
-                                    variancearray=self.variancearray)
+                                    variancearray=varchunks)
 
         if self.optimizeType == 'enhanced':
             logger.info('Enhanced Optimization')
@@ -844,27 +863,20 @@ class zclass(object):
 
     def _externalSVD(self, extSVD):
         logger.info('Calculating eigenvalues for input eigenspectra')
-        hdu = fits.open(extSVD)
         nseg = len(self.pranges)
 
-        # normalize the variance in the segments
-        self.variancearray = np.zeros((nseg, self.stack.shape[1]))
+        if isinstance(extSVD, zclass):
+            eigenspectra = [esp[0] for esp in extSVD.especeval]
+        else:
+            with fits.open(extSVD) as hdulist:
+                eigenspectra = [hdu.data for hdu in hdulist[1:]]
 
+        self.especeval = especeval = []
         for i in range(nseg):
             pmin, pmax = self.pranges[i]
-            self.variancearray[i, :] = np.var(self.normstack[pmin:pmax, :],
-                                              axis=0)
-            self.normstack[pmin:pmax, :] /= self.variancearray[i, :]
-
-        especeval = []
-        for i in range(nseg):
-            eigenspectra = hdu[i + 1].data
-            ns = self.normstack[self.pranges[i][0]:self.pranges[i][1]]
-            evals = np.transpose(np.transpose(ns).dot(eigenspectra))
-            especeval.append([eigenspectra, evals])
-
-        self.especeval = especeval
-        hdu.close()
+            ns = self.normstack[pmin:pmax]
+            evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
+            especeval.append([eigenspectra[i], evals])
 
     def _applymask(self, mask):
         """Apply a mask to the input data to provide a cleaner basis set.
@@ -1187,7 +1199,7 @@ def _ivarcurve(i, istack, especeval=None, variancearray=None):
         # broadcast evals on evects and sum
         iprecon += (eig[:, np.newaxis] * ev[np.newaxis, :])
 
-        icleanstack = istack - (iprecon * variance)
+        icleanstack = istack - (iprecon * variance[:, np.newaxis])
         # calculate the variance on the cleaned segment
         ivarlist.append(np.var(icleanstack))
 

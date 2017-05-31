@@ -4,15 +4,14 @@ import argparse
 import logging
 import sys
 
-from .version import __version__
+from .version import __version__, __description__
 from .zap import process, CFTYPE_OPTIONS
 
 
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description='ZAP (the Zurich Atmosphere Purge) is a high precision sky'
-                    ' subtraction tool.'
+        description=__description__
     )
     addarg = parser.add_argument
     addarg('incube', help='Input datacube path')

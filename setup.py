@@ -6,6 +6,7 @@ from setuptools import setup, find_packages
 
 # Read version.py
 __version__ = None
+__description__ = None
 with open('zap2/version.py') as f:
     exec(f.read())
 
@@ -36,10 +37,9 @@ if '.dev' in __version__:
 setup(
     name='zap2',
     version=__version__,
-    description=('ZAP (the Zurich Atmosphere Purge) is a high precision sky'
-                 ' subtraction tool'),
-    author='Kurt Soto',
-    author_email='kurt.soto@phys.ethz.ch',
+    description=__description__,
+    author='Simon Conseil',
+    author_email='simon.conseil@univ-lyon1.fr',
     url='https://git-cral.univ-lyon1.fr/MUSE/zap2',
     license='MIT',
     packages=find_packages(),

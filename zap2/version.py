@@ -2,6 +2,8 @@
 
 __version__ = '2.0.dev'
 __date__ = '2017/05/30'
+__description__ = ('ZAP (the Zurich Atmosphere Purge) is a high precision sky'
+                   ' subtraction tool.')
 
 try:
     from ._githash import __githash__, __dev_value__

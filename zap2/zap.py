@@ -46,6 +46,8 @@ from .version import __version__
 # SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
 SKYSEG = [0, 10000]
 
+CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
+
 # Number of available CPUs
 NCPU = cpu_count()
 
@@ -615,7 +617,7 @@ class zclass(object):
         """
         logger.info('Applying Continuum Filter, cftype=%s, cfwidth=%d',
                     cftype, cfwidth)
-        if cftype not in ('weight', 'median', 'fit', 'none'):
+        if cftype not in CFTYPE_OPTIONS:
             raise ValueError("cftype must be weight, median, fit or none, "
                              "got {}".format(cftype))
         self._cftype = cftype

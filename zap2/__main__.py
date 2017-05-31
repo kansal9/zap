@@ -3,10 +3,9 @@
 import argparse
 import logging
 import sys
-import traceback
 
 from .version import __version__
-from .zap import process
+from .zap import process, CFTYPE_OPTIONS
 
 
 def main():
@@ -40,8 +39,9 @@ def main():
            help='method for the zeroth order sky removal: none, sigclip or '
            'median')
     addarg('--cftype', default='weight',
-           help='method for the continuum filter: median or weight. For the '
-           'weight method, a zeroth order sky is required (see zlevel)')
+           help='method for the continuum filter: {}. For the '
+           'weight method, a zeroth order sky is required (see zlevel)'
+           .format(', '.join(CFTYPE_OPTIONS)))
     args = parser.parse_args()
 
     if args.debug:
@@ -57,6 +57,7 @@ def main():
         sys.exit('Interrupted!')
     except Exception as e:
         if args.debug:
+            import traceback
             traceback.print_exc()
         sys.exit('Failed to process file: %s' % e)
 

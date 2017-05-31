@@ -3,6 +3,6 @@
 build/
 dist/
 doc/_build/
-zap/#zap.py#
-zap/.#zap.py
-zap/_githash.py
+zap2/#zap.py#
+zap2/.#zap.py
+zap2/_githash.py

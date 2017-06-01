@@ -95,9 +95,9 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     zlevel : str
         Method for the zeroth order sky removal: `none`, `sigclip` or `median`
         (default).
-    cftype : str
-        Method for the continuum filter: `median` or `weight` (default). For
-        the `weight` method, a zeroth order sky is required (see `zlevel`).
+    cftype : {'weight', 'median', 'fit', 'none'}
+        Method for the continuum filter. For the `weight` method, a zeroth
+        order sky is required (see `zlevel`).
     cfwidthSVD : int or float
         Window size for the continuum filter, for the SVD computation.
         Default to 100.
@@ -211,9 +211,9 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     zlevel : str
         Method for the zeroth order sky removal: `none`, `sigclip` or `median`
         (default).
-    cftype : str
-        Method for the continuum filter: `median` or `weight` (default). For
-        the `weight` method, a zeroth order sky is required (see `zlevel`).
+    cftype : {'weight', 'median', 'fit', 'none'}
+        Method for the continuum filter. For the `weight` method, a zeroth
+        order sky is required (see `zlevel`).
     cfwidth : int or float
         Window size for the continuum filter, default to 300.
     mask : str

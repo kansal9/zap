@@ -35,7 +35,6 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
-from numpy import nanmedian, nanmean
 from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
 from time import time
@@ -919,36 +918,6 @@ def _compute_deriv(arr, nsigma=5):
     return deriv, mn1, std1
 
 
-def median_absolute_deviation(a, axis=None):
-    """Calculate the median absolute deviation (MAD).
-
-    Copied from Astropy to allow use np.nanmedian which is much faster here.
-
-    """
-    a = np.asanyarray(a)
-    a_median = nanmedian(a, axis=axis)
-
-    # broadcast the median array before subtraction
-    if axis is not None:
-        if isinstance(axis, (tuple, list)):
-            for ax in sorted(axis):
-                a_median = np.expand_dims(a_median, axis=ax)
-        else:
-            a_median = np.expand_dims(a_median, axis=axis)
-
-    return nanmedian(np.abs(a - a_median), axis=axis)
-
-
-def mad_std(data, axis=None):
-    """Calculate a robust standard deviation using the MAD.
-
-    Copied from Astropy to allow use np.nanmedian which is much faster here.
-
-    """
-    # NOTE: 1. / scipy.stats.norm.ppf(0.75) = 1.482602218505602
-    return median_absolute_deviation(data, axis=axis) * 1.482602218505602
-
-
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
     if cftype == 'median':
         func = _icfmedian
@@ -1113,5 +1082,5 @@ def _nanclean(cube, rejectratio=0.25, boxsz=1):
                 neighbor[outsider, icounter] = np.nan
                 icounter = icounter + 1
 
-    cleancube[z, y, x] = nanmean(neighbor, axis=1)
+    cleancube[z, y, x] = np.nanmean(neighbor, axis=1)
     return cleancube, badcube

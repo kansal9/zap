@@ -79,12 +79,11 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
-    Work on an input FITS file and optionally writes the product to an output
-    FITS file.
+    This is the main ZAP function. It works on an input FITS file and
+    optionally writes the product to an output FITS file.
 
     Parameters
     ----------
-
     musecubefits : str
         Input FITS file, containing a cube with data in the first extension.
     outcubefits : str
@@ -190,13 +189,14 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
               cfwidth=100, mask=None, ncpu=None, pca_class=None,
               n_components=None):
-    """ Performs the SVD decomposition of a datacube.
+    """Performs the SVD decomposition of a datacube.
 
-    This allows to use the SVD for a different datacube.
+    This allows to use the SVD for a different datacube. It used to allow to
+    save the SVD to a file but this is no more possible. Instead it returns
+    a ``zclass`` which can be given to the :func:`~zap.process` function.
 
     Parameters
     ----------
-
     musecubefits : str
         Input FITS file, containing a cube with data in the first extension.
     clean : bool
@@ -230,7 +230,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
 
 
 def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
-    """ A multiprocessed implementation of the continuum removal.
+    """A multiprocessed implementation of the continuum removal.
 
     This process distributes the data to many processes that then reassemble
     the data. Uses two filters, a small scale (less than the line spread
@@ -253,21 +253,17 @@ def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
 
 def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
                  boxsz=1):
-    """
-    Detects NaN values in cube and removes them by replacing them with an
-    interpolation of the nearest neighbors in the data cube. The positions in
-    the cube are retained in nancube for later remasking.
+    """Interpolates NaN values from the nearest neighbors.
 
     Parameters
     ----------
-
     musecubefits : str
         Input FITS file, containing a cube with data in the first extension.
     outfn : str
-        Output FITS file. Default to NANCLEAN_CUBE.fits
+        Output FITS file. Default to ``NANCLEAN_CUBE.fits``.
     rejectratio : float
         Defines a cutoff for the ratio of NAN to total pixels in a spaxel
-         before the spaxel is avoided completely. Default to 0.25
+        before the spaxel is avoided completely. Default to 0.25
     boxsz : int
         Defines the number of pixels around the offending NaN pixel.
         Default to 1, which looks for the 26 nearest neighbors which
@@ -566,7 +562,6 @@ class zclass(object):
         - run in an iterative sigma clipped mode
 
         """
-
         self.run_zlevel = calctype
 
         if calctype != 'none':
@@ -641,7 +636,7 @@ class zclass(object):
 
     @timeit
     def _msvd(self):
-        """ Multiprocessed singular value decomposition.
+        """Multiprocessed singular value decomposition.
 
         Takes the normalized, spectral segments and distributes them
         to the individual svd methods.
@@ -664,7 +659,7 @@ class zclass(object):
             self.models.append(self.pca_class(n_components=ncomp).fit(x))
 
     def chooseevals(self, nevals=[]):
-        """ Choose the number of eigenspectra/evals to use for reconstruction.
+        """Choose the number of eigenspectra/evals to use for reconstruction.
 
         User supplies the number of eigen spectra to be used (neval) or the
         percentage of the eigenspectra that were calculated (peval) from each
@@ -953,7 +948,6 @@ def median_absolute_deviation(a, axis=None):
     Copied from Astropy to allow use np.nanmedian which is much faster here.
 
     """
-
     a = np.asanyarray(a)
     a_median = nanmedian(a, axis=axis)
 
@@ -1006,13 +1000,12 @@ def rolling_window(a, window):  # function for striding to help speed up
 
 
 def wmedian(spec, wt, cfwidth=100):
-    """ Performs a weighted median filtering of a 1d spectrum
+    """Performs a weighted median filtering of a 1d spectrum.
 
-    Operates using a cumulative sum curve
+    Operates using a cumulative sum curve.
 
     Parameters
     ----------
-
     spec : numpy.ndarray
         Input 1d spectrum to be filtered
     wt : numpy.ndarray
@@ -1022,7 +1015,6 @@ def wmedian(spec, wt, cfwidth=100):
         Default to 100.
 
     """
-
     # ignore the warning (feature not a bug)
     old_settings = np.seterr(divide='ignore')
     spec = np.pad(spec, (cfwidth, cfwidth), 'constant', constant_values=0)

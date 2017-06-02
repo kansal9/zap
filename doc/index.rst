@@ -125,8 +125,8 @@ ZAP can also  be used interactively from within IPython ::
 
 The run method operates on the datacube, and retains all of the data and
 methods necessary to process a final data cube in a python class named
-:class:`~zap.zclass`. You can elect to investigate the data product via the
-:class:`~zap.zclass`, and even reprocess the cube with a different number of
+:class:`~zap.Zap`. You can elect to investigate the data product via the
+:class:`~zap.Zap`, and even reprocess the cube with a different number of
 eigenspectra per region.  A workflow may go as follows:
 
 .. code-block:: python
@@ -182,10 +182,10 @@ eigenspectra per region.  A workflow may go as follows:
   # or merge the zap datacube into the original input datacube, replacing the data extension
   zobj.writefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
 
-ZCLASS
-======
+Zap class
+=========
 
-.. autoclass:: zap.zclass
+.. autoclass:: zap.Zap
    :members:
 
 

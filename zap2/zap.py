@@ -112,8 +112,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         Provide either a single value that will be used for all of the
         segments, or a list of 11 values that will be used for each of the
         segments.
-    extSVD : zclass object
-        Can be a ``zclass`` (zap) object output from :func:`~zap.SVDoutput`.
+    extSVD : Zap object
+        Can be a ``Zap`` object output from :func:`~zap.SVDoutput`.
         If given, the SVD from this object will be used, otherwise the SVD is
         computed. So this allows to compute the SVD on an other field or with
         different settings.
@@ -127,10 +127,10 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         astronomical sources should be identified with an integer greater than
         or equal to 1. Default to None.
     interactive : bool
-        If True, a :class:`~zap.zclass` object containing all information on
+        If True, a :class:`~zap.Zap` object containing all information on
         the ZAP process is returned, and can be used to explore the
         eigenspectra and recompute the output (with the
-        :meth:`~zap.zclass.reprocess` method). In this case, the output files
+        :meth:`~zap.Zap.reprocess` method). In this case, the output files
         are not saved (`outcubefits` and `skycubefits` are ignored). Default to
         False.
 
@@ -161,7 +161,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         extSVD = SVDoutput(musecubefits, clean=clean, zlevel=zlevel,
                            cftype=cftype, cfwidth=cfwidthSVD, mask=mask)
 
-    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
+    zobj = Zap(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               nevals=nevals, extSVD=extSVD)
 
@@ -183,7 +183,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
 
     This allows to use the SVD for a different datacube. It used to allow to
     save the SVD to a file but this is no more possible. Instead it returns
-    a ``zclass`` which can be given to the :func:`~zap.process` function.
+    a ``Zap`` which can be given to the :func:`~zap.process` function.
 
     Parameters
     ----------
@@ -211,7 +211,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
         global NCPU
         NCPU = ncpu
 
-    zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
+    zobj = Zap(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
                   cfwidth=cfwidth, mask=mask)
     zobj._msvd()
@@ -281,7 +281,7 @@ def timeit(func):
 
 # ================= Main class =================
 
-class zclass(object):
+class Zap(object):
 
     """ Main class to run each of the steps of ZAP.
 
@@ -332,12 +332,6 @@ class zclass(object):
     """
 
     def __init__(self, musecubefits, pca_class=None, n_components=None):
-        """ Initialization of the zclass.
-
-        Pulls the datacube into the class and trims it based on the known
-        optimal spectral range of MUSE.
-
-        """
         self.musecubefits = musecubefits
         with fits.open(musecubefits) as hdul:
             self.cube = hdul[1].data
@@ -446,7 +440,7 @@ class zclass(object):
 
     def _run(self, clean=True, zlevel='median', cftype='weight',
              cfwidth=100, nevals=[], extSVD=None):
-        """ Perform all zclass to ZAP a datacube:
+        """ Perform all steps to ZAP a datacube:
 
         - NaN re/masking,
         - deconstruction into "stacks",
@@ -503,7 +497,7 @@ class zclass(object):
         a single NaN value, since this would cause the linear algebra routines
         to crash.
 
-        Adds the x and y data of these positions into the zclass
+        Adds the x and y data of these positions into the Zap class
 
         """
         # make a map of spaxels with NaNs
@@ -518,7 +512,7 @@ class zclass(object):
     def _externalzlevel(self, extSVD):
         """Remove the zero level from the extSVD file."""
         logger.debug('Using external zlevel from %s', extSVD)
-        if isinstance(extSVD, zclass):
+        if isinstance(extSVD, Zap):
             self.zlsky = np.array(extSVD.zlsky, copy=True)
             self.run_zlevel = extSVD.run_zlevel
         else:

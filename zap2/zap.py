@@ -42,10 +42,15 @@ from time import time
 
 from .version import __version__
 
-# Limits of the segments in Angstroms
-# SKYSEG = [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+# Limits of the segments in Angstroms. Zap now uses by default only one
+# segment, see below for the old values.
 SKYSEG = [0, 10000]
 
+# These are the old limits from the original zap. Keeping them for reference,
+# and may be useful for further testing.
+# [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
+
+# List of allowed values for cftype (continuum filter)
 CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
 
 # Number of available CPUs
@@ -115,9 +120,11 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         Provide either a single value that will be used for all of the
         segments, or a list of 11 values that will be used for each of the
         segments.
-    extSVD : str
-        Path of an input FITS file containing a SVD computed by the
-        :func:`~zap.SVDoutput` function. Otherwise the SVD is computed.
+    extSVD : zclass object
+        Can be a ``zclass`` (zap) object output from :func:`~zap.SVDoutput`.
+        If given, the SVD from this object will be used, otherwise the SVD is
+        computed. So this allows to compute the SVD on an other field or with
+        different settings.
     skycubefits : str
         Path for the optional output of the sky that is subtracted from the
         cube. This is simply the input cube minus the output cube.

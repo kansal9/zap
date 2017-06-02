@@ -135,6 +135,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         False.
 
     """
+    logger.info('Running ZAP %s !', __version__)
+    t0 = time()
     if not isinstance(musecubefits, string_types):
         raise TypeError('The process method only accepts a single datacube '
                         'filename.')
@@ -171,6 +173,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         zobj.writeskycube(skycubefits=skycubefits)
 
     zobj.mergefits(outcubefits)
+    logger.info('Zapped! (took %.2f sec.)', time() - t0)
 
 
 def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
@@ -202,7 +205,6 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
         Path of a FITS file containing a mask (1 for objects, 0 for sky).
 
     """
-    logger.info('Running ZAP %s !', __version__)
     logger.info('Processing %s to compute the SVD', musecubefits)
 
     if ncpu is not None:
@@ -404,7 +406,6 @@ class zclass(object):
             logger.info('Using %s', pca_class)
             self.pca_class = pca_class
         else:
-            logger.info("Using scikit-learn's PCA")
             self.pca_class = PCA
 
         # Reconstruction of sky features
@@ -415,8 +416,6 @@ class zclass(object):
     @timeit
     def _prepare(self, clean=True, zlevel='median', cftype='weight',
                  cfwidth=100, extzlevel=None, mask=None):
-        logger.info('Preprocessing data')
-
         # Check for consistency between weighted median and zlevel keywords
         if cftype == 'weight' and zlevel == 'none':
             raise ValueError('Weighted median requires a zlevel calculation')
@@ -445,7 +444,6 @@ class zclass(object):
         # normalize the variance in the segments.
         self._normalize_variance()
 
-    @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
              cfwidth=100, nevals=[], extSVD=None):
         """ Perform all zclass to ZAP a datacube:
@@ -486,7 +484,6 @@ class zclass(object):
         # stuff the new spectra back into the cube
         self.remold()
 
-    # Clean up the nan value spaxels
     def _nanclean(self):
         """
         Detects NaN values in cube and removes them by replacing them with an
@@ -499,28 +496,28 @@ class zclass(object):
 
     @timeit
     def _extract(self):
-        """
-        Deconstruct the datacube into a 2d array, since spatial information is
-        not required, and the linear algebra routines require 2d arrays.
+        """Deconstruct the datacube into a 2d array.
 
-        The operation rejects any spaxel with even a single NaN value, since
-        this would cause the linear algebra routines to crash.
+        Since spatial information is not required, and the linear algebra
+        routines require 2d arrays. The operation rejects any spaxel with even
+        a single NaN value, since this would cause the linear algebra routines
+        to crash.
 
         Adds the x and y data of these positions into the zclass
 
         """
-        logger.debug('Extracting to 2D')
         # make a map of spaxels with NaNs
         badmap = (np.logical_not(np.isfinite(self.cube))).sum(axis=0)
         # get positions of those with no NaNs
         self.y, self.x = np.where(badmap == 0)
         # extract those positions into a 2d array
         self.stack = self.cube[:, self.y, self.x]
-        logger.debug('%d valid spaxels', len(self.x))
+        logger.info('Extract to 2D, %d valid spaxels (%d%%)', len(self.x),
+                    len(self.x) / np.prod(self.cube.shape[1:]) * 100)
 
     def _externalzlevel(self, extSVD):
         """Remove the zero level from the extSVD file."""
-        logger.info('Using external zlevel from %s', extSVD)
+        logger.debug('Using external zlevel from %s', extSVD)
         if isinstance(extSVD, zclass):
             self.zlsky = np.array(extSVD.zlsky, copy=True)
             self.run_zlevel = extSVD.run_zlevel
@@ -547,27 +544,26 @@ class zclass(object):
 
         """
         self.run_zlevel = calctype
-
-        if calctype != 'none':
-            logger.info('Subtracting Zero Level')
-
-            zlstack = self.stack
-
-            if calctype == 'median':
-                logger.info('Median zlevel calculation')
-                func = _imedian
-            elif calctype == 'sigclip':
-                logger.info('Iterative Sigma Clipping zlevel calculation')
-                func = _isigclip
-
-            self.zlsky = np.hstack(parallel_map(func, zlstack, NCPU, axis=0))
-            self.stack -= self.zlsky[:, np.newaxis]
-        else:
+        if calctype == 'none':
             logger.info('Skipping zlevel subtraction')
+            return
+
+        if calctype == 'median':
+            logger.info('Median zlevel subtraction')
+            func = _imedian
+        elif calctype == 'sigclip':
+            logger.info('Iterative Sigma Clipping zlevel subtraction')
+            func = _isigclip
+        else:
+            raise ValueError('Unknow zlevel type, must be none, median, or '
+                             'sigclip')
+
+        self.zlsky = np.hstack(parallel_map(func, self.stack, NCPU, axis=0))
+        self.stack -= self.zlsky[:, np.newaxis]
 
     @timeit
     def _continuumfilter(self, cfwidth=100, cftype='weight'):
-        """ A multiprocessed implementation of the continuum removal.
+        """A multiprocessed implementation of the continuum removal.
 
         This process distributes the data to many processes that then
         reassemble the data.  Uses two filters, a small scale (less than the
@@ -607,7 +603,7 @@ class zclass(object):
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
-        logger.info('Normalizing variances')
+        logger.debug('Normalizing variances')
         # self.variancearray = np.std(self.stack, axis=1)
         # self.normstack /= self.variancearray[:, np.newaxis]
 
@@ -684,9 +680,7 @@ class zclass(object):
         """Reconstruct the residuals from a given set of eigenspectra and
         eigenvalues
         """
-
         logger.info('Reconstructing Sky Residuals')
-
         indices = [x[0] for x in self.pranges[1:]]
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)

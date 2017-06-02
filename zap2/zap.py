@@ -488,7 +488,6 @@ class zclass(object):
         if extSVD is None:
             self._msvd()
         else:
-            # self._externalSVD(extSVD)
             self.models = extSVD.models
 
         self.components = [m.components_.copy() for m in self.models]
@@ -788,23 +787,6 @@ class zclass(object):
         contcube = self.cube.copy() * np.nan
         contcube[:, self.y, self.x] = self.contarray
         return contcube
-
-    # def _externalSVD(self, extSVD):
-    #     logger.info('Calculating eigenvalues for input eigenspectra')
-    #     nseg = len(self.pranges)
-
-    #     if isinstance(extSVD, zclass):
-    #         eigenspectra = [esp[0] for esp in extSVD.especeval]
-    #     else:
-    #         with fits.open(extSVD) as hdulist:
-    #             eigenspectra = [hdu.data for hdu in hdulist[1:]]
-
-    #     self.especeval = especeval = []
-    #     for i in range(nseg):
-    #         pmin, pmax = self.pranges[i]
-    #         ns = self.normstack[pmin:pmax]
-    #         evals = np.transpose(np.transpose(ns).dot(eigenspectra[i]))
-    #         especeval.append([eigenspectra[i], evals])
 
     def _applymask(self, mask):
         """Apply a mask to the input data to provide a cleaner basis set.

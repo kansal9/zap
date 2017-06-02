@@ -139,9 +139,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         raise TypeError('The process method only accepts a single datacube '
                         'filename.')
 
-    # make sure it has the right extension
-    outcubefits = outcubefits.split('.fits')[0] + '.fits'
-
     # check if outcubefits/skycubefits exists before beginning
     check_file_exists(outcubefits)
     check_file_exists(skycubefits)
@@ -229,16 +226,14 @@ def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
 
     """
     check_file_exists(contsubfn)
-    hdu = fits.open(musecubefits)
-    data = hdu[1].data
-    stack = data.reshape(data.shape[0], (data.shape[1] * data.shape[2]))
-    contarray = _continuumfilter(stack, 'median', cfwidth=cfwidth)
-
-    # remove continuum features
-    stack -= contarray
-    hdu[1].data = stack.reshape(data.shape[0], data.shape[1], data.shape[2])
-    hdu.writeto(contsubfn)
-    hdu.close()
+    with fits.open(musecubefits) as hdu:
+        data = hdu[1].data
+        stack = data.reshape(data.shape[0], (data.shape[1] * data.shape[2]))
+        contarray = _continuumfilter(stack, 'median', cfwidth=cfwidth)
+        # remove continuum features
+        stack -= contarray
+        hdu[1].data = stack.reshape(data.shape)
+        hdu.writeto(contsubfn)
 
 
 def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
@@ -261,11 +256,10 @@ def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
 
     """
     check_file_exists(outfn)
-    hdu = fits.open(musecubefits)
-    cleancube = _nanclean(hdu[1].data, rejectratio=rejectratio, boxsz=boxsz)
-    hdu[1].data = cleancube[0]
-    hdu.writeto(outfn)
-    hdu.close()
+    with fits.open(musecubefits) as hdu:
+        hdu[1].data = _nanclean(hdu[1].data, rejectratio=rejectratio,
+                                boxsz=boxsz)[0]
+        hdu.writeto(outfn)
 
 
 def check_file_exists(filename):
@@ -807,11 +801,10 @@ class zclass(object):
         # make sure it has the right extension
         outcubefits = outcubefits.split('.fits')[0] + '.fits'
         check_file_exists(outcubefits)
-        hdu = fits.open(self.musecubefits)
-        hdu[1].header = _newheader(self)
-        hdu[1].data = self.cleancube
-        hdu.writeto(outcubefits)
-        hdu.close()
+        with fits.open(self.musecubefits) as hdu:
+            hdu[1].header = _newheader(self)
+            hdu[1].data = self.cleancube
+            hdu.writeto(outcubefits)
         logger.info('Cube file saved to %s', outcubefits)
 
     def plotvarcurve(self, i=0, ax=None):

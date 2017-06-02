@@ -74,9 +74,8 @@ logger = logging.getLogger(__name__)
 
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
-            nevals=[], optimizeType='normal', extSVD=None, skycubefits=None,
-            mask=None, interactive=False, ncpu=None, pca_class=None,
-            n_components=None):
+            nevals=[], extSVD=None, skycubefits=None, mask=None,
+            interactive=False, ncpu=None, pca_class=None, n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     This is the main ZAP function. It works on an input FITS file and
@@ -109,11 +108,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         features for calculating the eigenvalues per spectrum. Smaller values
         better trace the sources. An optimal range of is typically
         20 - 50 pixels. Default to 50.
-    optimizeType : str
-        Optimization method to compute the number of eigenspectra used for each
-        segment: `none`, `normal` (default), `enhanced`. If `none`, the number
-        of eigenspectra must be specified with `nevals`, otherwise
-        `normal` is used.
     nevals : list
         Allow to specify the number of eigenspectra used for each segment.
         Provide either a single value that will be used for all of the
@@ -157,9 +151,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         global NCPU
         NCPU = ncpu
 
-    if optimizeType not in ('none', 'normal', 'enhanced'):
-        raise ValueError('Invalid value for optimizeType')
-
     if extSVD is not None and mask is not None:
         raise ValueError('extSVD and mask parameters are incompatible: if mask'
                          ' must be used, then the SVD has to be recomputed')
@@ -174,7 +165,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
-              nevals=nevals, optimizeType=optimizeType, extSVD=extSVD)
+              nevals=nevals, extSVD=extSVD)
 
     if interactive:
         # Return the zobj object without saving files
@@ -463,7 +454,7 @@ class zclass(object):
 
     @timeit
     def _run(self, clean=True, zlevel='median', cftype='weight',
-             cfwidth=100, nevals=[], optimizeType='normal', extSVD=None):
+             cfwidth=100, nevals=[], extSVD=None):
         """ Perform all zclass to ZAP a datacube:
 
         - NaN re/masking,
@@ -490,7 +481,7 @@ class zclass(object):
 
         # choose some fraction of eigenspectra or some finite number of
         # eigenspectra
-        if optimizeType != 'none' or nevals == []:
+        if nevals == []:
             self.optimize()
             self.chooseevals(nevals=self.nevals)
         else:
@@ -740,7 +731,7 @@ class zclass(object):
         self.remold()
 
     def optimize(self):
-        """ Function to optimize the number of components used to characterize
+        """Compute the optimal number of components needed to characterize
         the residuals.
 
         This function calculates the variance per segment with an increasing
@@ -756,20 +747,6 @@ class zclass(object):
             var = model.explained_variance_
             deriv, mn1, std1 = _compute_deriv(var)
             cross = np.append([False], deriv >= (mn1 - std1))
-
-            # if self.optimizeType != 'enhanced':
-            #     # look for crossing points. When they get within 1 sigma of
-            #     # mean in settled region.
-            #     # pad by 1 for 1st deriv
-            #     cross1 = np.append([False], deriv >= (mn1 - std1))
-            #     # pad by 2 for 2nd
-            #     cross2 = np.append([False, False],
-            #                        np.abs(deriv2) <= (mn2 + std2))
-            #     cross = np.logical_or(cross1, cross2)
-            # else:
-            #     # pad by 1 for 1st deriv
-            #     cross = np.append([False], deriv >= (mn1 - std1))
-
             ncomp.append(np.where(cross)[0][0])
 
         self.nevals = np.array(ncomp)

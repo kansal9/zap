@@ -25,8 +25,6 @@ def main():
            help='output datacube path')
     addarg('--mask', help='Mask file to exclude sources')
     addarg('--skycube', help='Sky datacube path')
-    addarg('--svdoutput', default='ZAP_SVD.fits',
-           help='output SVD FITS file')
     addarg('--extsvd',
            help='Path of an input FITS file containing a SVD computed in a '
            'previous step')
@@ -49,7 +47,7 @@ def main():
     try:
         process(
             args.incube, outcubefits=args.outcube, clean=not args.no_clean,
-            skycubefits=args.skycube, svdoutputfits=args.svdoutput,
+            skycubefits=args.skycube,
             mask=args.mask, extSVD=args.extsvd, cfwidthSVD=args.cfwidthSVD,
             cfwidthSP=args.cfwidthSP, zlevel=args.zlevel, cftype=args.cftype)
     except KeyboardInterrupt:

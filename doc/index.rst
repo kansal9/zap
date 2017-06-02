@@ -1,8 +1,3 @@
-.. zap documentation master file, created by
-   sphinx-quickstart on Mon Nov 25 09:46:49 2013.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 ===============================
 Welcome to ZAP's documentation!
 ===============================
@@ -12,7 +7,14 @@ Welcome to ZAP's documentation!
 
 Tired of sky subtraction residuals? ZAP them!
 
-ZAP (the Zurich Atmosphere Purge) is a high precision sky subtraction tool which can be used as complete sky subtraction solution, or as an enhancement to previously sky-subtracted MUSE integral field spectroscopic data.  The method uses PCA to isolate the residual sky subtraction features and remove them from the observed datacube. Though the operation of ZAP is not dependent on perfect flatfielding of the data in a MUSE exposure, better results are obtained when these corrections are made ahead of time. Future development will include expansion to more instruments.
+ZAP (the Zurich Atmosphere Purge) is a high precision sky subtraction tool
+which can be used as complete sky subtraction solution, or as an enhancement to
+previously sky-subtracted MUSE integral field spectroscopic data.  The method
+uses PCA to isolate the residual sky subtraction features and remove them from
+the observed datacube. Though the operation of ZAP is not dependent on perfect
+flatfielding of the data in a MUSE exposure, better results are obtained when
+these corrections are made ahead of time. Future development will include
+expansion to more instruments.
 
 Installation
 ============
@@ -24,8 +26,11 @@ ZAP requires the following packages:
 * Numpy 1.6.0 or later
 * Astropy v1.0 or later
 * SciPy v0.13.3 or later
+* Scikit-learn
 
-Many linear algebra operations are performed in ZAP, so it can be beneficial to use an alternative BLAS package. In the Anaconda distribution, the default BLAS comes with Numpy linked to OpenBlas, which can amount to a 20% speedup of ZAP.
+Many linear algebra operations are performed in ZAP, so it can be beneficial to
+use an alternative BLAS package. In the Anaconda distribution, the default BLAS
+comes with Numpy linked to OpenBlas, which can amount to a 20% speedup of ZAP.
 
 Steps
 -----
@@ -38,20 +43,26 @@ ZAP can be installed using pip ::
 Examples
 ========
 
-In its most hands-off form, ZAP can take an input fits datacube, operate on it, and output a final fits datacube::
+In its most hands-off form, ZAP can take an input fits datacube, operate on it,
+and output a final fits datacube::
 
   import zap
   zap.process('INPUT.fits', outcubefits='OUTPUT.fits')
 
-Care should be taken, however, since this case assumes a sparse field, and better results can be obtained by applying masks.
+Care should be taken, however, since this case assumes a sparse field, and
+better results can be obtained by applying masks.
 
 The main function is ``zap.process``.
 
-There are a number of options that can be passed to the code which we describe here:
+There are a number of options that can be passed to the code which we describe
+here:
 
 .. autofunction:: zap.process
 
-The code can handle datacubes trimmed in wavelength space. Since the code uses the correlation of segments of the emission line spectrum, it is best to trim the cube at specific wavelengths. The cube can include any connected subset of these segments. (for example 6400 - 8200 Angstroms) ::
+The code can handle datacubes trimmed in wavelength space. Since the code uses
+the correlation of segments of the emission line spectrum, it is best to trim
+the cube at specific wavelengths. The cube can include any connected subset of
+these segments. (for example 6400 - 8200 Angstroms) ::
 
   [0,    5400]
   [5400, 5850]
@@ -69,20 +80,30 @@ The code can handle datacubes trimmed in wavelength space. Since the code uses t
 Sparse Field Case
 -----------------
 
-This case specifically refers to the case where the sky can be measured in the sky frame itself, using::
+This case specifically refers to the case where the sky can be measured in the
+sky frame itself, using::
 
   zap.process('INPUT.fits', outcubefits='OUTPUT.fits')
 
-In both cases, the code will create a resulting processed datacube named ``DATACUBE_ZAP.fits`` and an SVD file named ``ZAP_SVD.fits`` in the current directory. While this can work well in the case of very faint sources, masks can improve the results.
+In both cases, the code will create a resulting processed datacube named
+``DATACUBE_ZAP.fits`` and an SVD file named ``ZAP_SVD.fits`` in the current
+directory. While this can work well in the case of very faint sources, masks
+can improve the results.
 
-For the sparse field case, a mask file can be included, which is a 2d fits image matching the spatial dimensions of the input datacube. Masks are defined to be >= 1 on astronomical sources and 0 at the position of the sky. Set this parameter with the ``mask`` keyword ::
+For the sparse field case, a mask file can be included, which is a 2d fits
+image matching the spatial dimensions of the input datacube. Masks are defined
+to be >= 1 on astronomical sources and 0 at the position of the sky. Set this
+parameter with the ``mask`` keyword ::
 
   zap.process('INPUT.fits', outcubefits='OUTPUT.fits', mask='mask.fits')
 
 Filled Field Case
 -----------------
 
-This approach also can address the saturated field case and is robust in the case of strong emission lines, in this case the input is an offset sky observation. To achieve this, we calculate the SVD on an external sky frame using the function ``zap.SVDoutput``
+This approach also can address the saturated field case and is robust in the
+case of strong emission lines, in this case the input is an offset sky
+observation. To achieve this, we calculate the SVD on an external sky frame
+using the function ``zap.SVDoutput``
 
 .. autofunction:: zap.SVDoutput
 
@@ -91,12 +112,16 @@ An example of running the code in this way is as follows::
   zap.SVDoutput('Offset_Field_CUBE.fits', svdfn='ZAP_SVD.fits', mask='mask.fits')
   zap.process('Source_cube.fits', outcubefits='OUTPUT.fits', extSVD='ZAP_SVD.fits', cfwidthSP=50)
 
-The integration time of this frame does not need to be the same as the object exposure, but rather just a 2-3 minute exposure. Often residuals can be further reduced by changing `cfwidthSP` to a smaller value. However, this parameter should not be reduced to smaller than 15 pixels.
+The integration time of this frame does not need to be the same as the object
+exposure, but rather just a 2-3 minute exposure. Often residuals can be further
+reduced by changing `cfwidthSP` to a smaller value. However, this parameter
+should not be reduced to smaller than 15 pixels.
 
 Extra Functions
 ===============
 
-Aside from the main process, two functions are included that can be run outside of the entire zap process to facilitate some investigations.
+Aside from the main process, two functions are included that can be run outside
+of the entire zap process to facilitate some investigations.
 
 .. autofunction:: zap.nancleanfits
 
@@ -110,7 +135,8 @@ ZAP can also be used from the command line::
 
   python -m zap INPUT_CUBE.fits
 
-More information use of the command line interface can be found with the command ::
+More information use of the command line interface can be found with the
+command ::
 
   python -m zap -h
 
@@ -168,7 +194,8 @@ eigenspectra per region.  A workflow may go as follows:
   # compare to the previous versions
   plt.plot(zobj.cleancube[:,50:100,50:100].sum(axis=(1,2))), 'r')
 
-  # identify a pixel in the dispersion axis that shows a residual feature in the original
+  # identify a pixel in the dispersion axis that shows a residual feature in
+  # the original
   plt.figure()
   plt.matshow(zobj.cube[2903,:,:])
 
@@ -179,7 +206,8 @@ eigenspectra per region.  A workflow may go as follows:
   # write the processed cube as a single extension fits
   zobj.writecube('DATACUBE_ZAP.fits')
 
-  # or merge the zap datacube into the original input datacube, replacing the data extension
+  # or merge the zap datacube into the original input datacube, replacing the
+  # data extension
   zobj.writefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
 
 Zap class
@@ -187,5 +215,3 @@ Zap class
 
 .. autoclass:: zap.Zap
    :members:
-
-

@@ -67,12 +67,11 @@ logger = logging.getLogger(__name__)
 
 # ================= Top Level Functions =================
 
-
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
-            nevals=[], optimizeType='normal', extSVD=None,
-            skycubefits=None, svdoutputfits='ZAP_SVD.fits', mask=None,
-            interactive=False, ncpu=None, pca_class=None, n_components=None):
+            nevals=[], optimizeType='normal', extSVD=None, skycubefits=None,
+            mask=None, interactive=False, ncpu=None, pca_class=None,
+            n_components=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     Work on an input FITS file and optionally writes the product to an output
@@ -122,8 +121,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     skycubefits : str
         Path for the optional output of the sky that is subtracted from the
         cube. This is simply the input cube minus the output cube.
-    svdoutputfits : str
-        Output FITS file containing the eigenbasis. Default to `ZAP_SVD.fits`.
     mask : str
         A 2D fits image to exclude regions that may contaminate the zlevel or
         eigenspectra. This image should be constructed from the datacube itself
@@ -149,8 +146,6 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     # check if outcubefits/skycubefits exists before beginning
     check_file_exists(outcubefits)
     check_file_exists(skycubefits)
-    if extSVD is None:
-        check_file_exists(svdoutputfits)
 
     if ncpu is not None:
         global NCPU
@@ -168,9 +163,8 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        extSVD = SVDoutput(musecubefits, svdoutputfits=svdoutputfits,
-                           clean=clean, zlevel=zlevel, cftype=cftype,
-                           cfwidth=cfwidthSVD, mask=mask)
+        extSVD = SVDoutput(musecubefits, clean=clean, zlevel=zlevel,
+                           cftype=cftype, cfwidth=cfwidthSVD, mask=mask)
 
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
@@ -180,19 +174,15 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # Return the zobj object without saving files
         return zobj
 
-    # if zobj.run_zlevel != 'extSVD' and svdoutputfits is not None:
-    #     # Save SVD only if it was computed in _run, i.e. if an external SVD
-    #     # was not given
-    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
     if skycubefits is not None:
         zobj.writeskycube(skycubefits=skycubefits)
 
     zobj.mergefits(outcubefits)
 
 
-def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
-              zlevel='median', cftype='weight', cfwidth=100, mask=None,
-              ncpu=None, pca_class=None, n_components=None):
+def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
+              cfwidth=100, mask=None, ncpu=None, pca_class=None,
+              n_components=None):
     """ Performs the SVD decomposition of a datacube.
 
     This allows to use the SVD for a different datacube.
@@ -202,8 +192,6 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
 
     musecubefits : str
         Input FITS file, containing a cube with data in the first extension.
-    svdoutputfits : str
-        Output FITS file. Default to ZAP_SVD.fits
     clean : bool
         If True (default value), the NaN values are cleaned. Spaxels with more
         then 25% of NaN values are removed, the others are replaced with an
@@ -222,7 +210,6 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     """
     logger.info('Running ZAP %s !', __version__)
     logger.info('Processing %s to compute the SVD', musecubefits)
-    check_file_exists(svdoutputfits)
 
     if ncpu is not None:
         global NCPU
@@ -231,14 +218,7 @@ def SVDoutput(musecubefits, svdoutputfits='ZAP_SVD.fits', clean=True,
     zobj = zclass(musecubefits, pca_class=pca_class, n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
                   cfwidth=cfwidth, mask=mask)
-
-    # do the multiprocessed SVD calculation
     zobj._msvd()
-
-    # write to file
-    # if svdoutputfits is not None:
-    #     zobj.writeSVD(svdoutputfits=svdoutputfits)
-
     return zobj
 
 
@@ -873,28 +853,6 @@ class zclass(object):
         hdu.writeto(outcubefits)
         hdu.close()
         logger.info('Cube file saved to %s', outcubefits)
-
-    # def writeSVD(self, svdoutputfits='ZAP_SVD.fits'):
-    #     """Write the SVD to an individual fits file."""
-
-    #     check_file_exists(svdoutputfits)
-    #     header = fits.Header()
-    #     header['ZAPvers'] = (__version__, 'ZAP version')
-    #     header['ZAPzlvl'] = (self.run_zlevel, 'ZAP zero level correction')
-    #     header['ZAPclean'] = (self.run_clean,
-    #                           'ZAP NaN cleaning performed for calculation')
-    #     header['ZAPcftyp'] = (self._cftype, 'ZAP continuum filter type')
-    #     header['ZAPcfwid'] = (self._cfwidth, 'ZAP continuum filter size')
-    #     header['ZAPmask'] = (self.maskfile, 'ZAP mask used to remove sources')
-    #     nseg = len(self.pranges)
-    #     header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
-
-    #     hdu = fits.HDUList([fits.PrimaryHDU(self.zlsky)])
-    #     for i in range(len(self.pranges)):
-    #         hdu.append(fits.ImageHDU(self.especeval[i][0]))
-    #     # write for later use
-    #     hdu.writeto(svdoutputfits)
-    #     logger.info('SVD file saved to %s', svdoutputfits)
 
     def plotvarcurve(self, i=0, ax=None):
         var = self.models[i].explained_variance_

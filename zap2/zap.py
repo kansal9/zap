@@ -226,24 +226,23 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
     return zobj
 
 
-def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cftype='median',
-                cfwidth=100, overwrite=False):
-    """A multiprocessed implementation of the continuum removal.
+def contsubfits(cubefits, outfits='CONTSUB_CUBE.fits', ncpu=None,
+                cftype='median', cfwidth=100, clean_nan=True, zlevel='median',
+                overwrite=False):
+    """A standalone implementation of the continuum removal."""
+    if ncpu is not None:
+        global NCPU
+        NCPU = ncpu
 
-    This process distributes the data to many processes that then reassemble
-    the data. Uses two filters, a small scale (less than the line spread
-    function) uniform filter, and a large scale median filter to capture the
-    structure of a variety of continuum shapes.
+    zobj = Zap(cubefits)
+    zobj._prepare(clean=clean_nan, zlevel=zlevel, cftype=cftype,
+                  cfwidth=cfwidth)
+    cube = zobj.make_contcube()
 
-    """
-    with fits.open(musecubefits) as hdu:
-        data = hdu[1].data
-        stack = data.reshape(data.shape[0], -1)
-        contarray = _continuumfilter(stack, cftype, cfwidth=cfwidth)
-        # remove continuum features
-        stack -= contarray
-        hdu[1].data = stack.reshape(data.shape)
-        write_hdulist_to(hdu, contsubfn, overwrite=overwrite)
+    outhead = _newheader(zobj)
+    outhdu = fits.PrimaryHDU(data=cube, header=outhead)
+    write_hdulist_to(outhdu, outfits, overwrite=overwrite)
+    logger.info('Continuum cube file saved to %s', outfits)
 
 
 def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
@@ -1000,12 +999,13 @@ def _newheader(zobj):
     header['ZAPnseg'] = (nseg, 'Number of segments used for ZAP SVD')
 
     # per segment variables
-    for i in range(nseg):
-        header['ZAPseg{0}'.format(i)] = (
-            '{0}:{1}'.format(zobj.pranges[i][0], zobj.pranges[i][1] - 1),
-            'spectrum segment (pixels)')
-        header['ZAPnev{0}'.format(i)] = (zobj.nevals[i],
-                                         'number of eigenvals/spectra used')
+    if hasattr(zobj, 'nevals'):
+        for i in range(nseg):
+            header['ZAPseg{}'.format(i)] = (
+                '{}:{}'.format(zobj.pranges[i][0], zobj.pranges[i][1] - 1),
+                'spectrum segment (pixels)')
+            header['ZAPnev{}'.format(i)] = (zobj.nevals[i],
+                                            'number of eigenvals/spectra used')
 
     return header
 

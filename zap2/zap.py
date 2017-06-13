@@ -32,6 +32,7 @@ import scipy.ndimage as ndi
 import sys
 
 from astropy.io import fits
+from astropy.utils import minversion
 from astropy.wcs import WCS
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
@@ -56,6 +57,7 @@ CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
 NCPU = cpu_count()
 
 PY2 = sys.version_info[0] == 2
+ASTROPY_LT_1_3 = not minversion('astropy', '1.3')
 
 if not PY2:
     text_type = str
@@ -74,7 +76,8 @@ logger = logging.getLogger(__name__)
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
             nevals=[], extSVD=None, skycubefits=None, mask=None,
-            interactive=False, ncpu=None, pca_class=None, n_components=None):
+            interactive=False, ncpu=None, pca_class=None, n_components=None,
+            overwrite=False):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     This is the main ZAP function. It works on an input FITS file and
@@ -142,8 +145,13 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
                         'filename.')
 
     # check if outcubefits/skycubefits exists before beginning
-    check_file_exists(outcubefits)
-    check_file_exists(skycubefits)
+    if not overwrite:
+        def _check_file_exists(filename):
+            if filename is not None and os.path.exists(filename):
+                raise IOError('Output file "{0}" exists'.format(filename))
+
+        _check_file_exists(outcubefits)
+        _check_file_exists(skycubefits)
 
     if ncpu is not None:
         global NCPU
@@ -219,7 +227,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
 
 
 def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cftype='median',
-                cfwidth=100):
+                cfwidth=100, overwrite=False):
     """A multiprocessed implementation of the continuum removal.
 
     This process distributes the data to many processes that then reassemble
@@ -228,7 +236,6 @@ def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cftype='median',
     structure of a variety of continuum shapes.
 
     """
-    check_file_exists(contsubfn)
     with fits.open(musecubefits) as hdu:
         data = hdu[1].data
         stack = data.reshape(data.shape[0], -1)
@@ -236,11 +243,11 @@ def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cftype='median',
         # remove continuum features
         stack -= contarray
         hdu[1].data = stack.reshape(data.shape)
-        hdu.writeto(contsubfn)
+        write_hdulist_to(hdu, contsubfn, overwrite=overwrite)
 
 
 def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
-                 boxsz=1):
+                 boxsz=1, overwrite=False):
     """Interpolates NaN values from the nearest neighbors.
 
     Parameters
@@ -258,16 +265,10 @@ def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
         is a 3x3x3 cube.
 
     """
-    check_file_exists(outfn)
     with fits.open(musecubefits) as hdu:
         hdu[1].data = _nanclean(hdu[1].data, rejectratio=rejectratio,
                                 boxsz=boxsz)[0]
-        hdu.writeto(outfn)
-
-
-def check_file_exists(filename):
-    if filename is not None and os.path.exists(filename):
-        raise IOError('Output file "{0}" exists'.format(filename))
+        write_hdulist_to(hdu, outfn, overwrite=overwrite)
 
 
 def timeit(func):
@@ -754,41 +755,29 @@ class Zap(object):
                     nmasked / np.prod(mask.shape) * 100)
         self.cube[:, mask] = np.nan
 
-    def writecube(self, outcubefits='DATACUBE_ZAP.fits'):
+    def writecube(self, outcubefits='DATACUBE_ZAP.fits', overwrite=False):
         """Write the processed datacube to an individual fits file."""
-
-        check_file_exists(outcubefits)
-        # fix up for writing
         outhead = _newheader(self)
-
-        # create hdu and write
         outhdu = fits.PrimaryHDU(data=self.cleancube, header=outhead)
-        outhdu.writeto(outcubefits)
+        write_hdulist_to(outhdu, outcubefits, overwrite=overwrite)
         logger.info('Cube file saved to %s', outcubefits)
 
-    def writeskycube(self, skycubefits='SKYCUBE_ZAP.fits'):
+    def writeskycube(self, skycubefits='SKYCUBE_ZAP.fits', overwrite=False):
         """Write the processed datacube to an individual fits file."""
-
-        check_file_exists(skycubefits)
-        # fix up for writing
         outcube = self.cube - self.cleancube
         outhead = _newheader(self)
-
-        # create hdu and write
         outhdu = fits.PrimaryHDU(data=outcube, header=outhead)
-        outhdu.writeto(skycubefits)
+        write_hdulist_to(outhdu, skycubefits, overwrite=overwrite)
         logger.info('Sky cube file saved to %s', skycubefits)
 
-    def mergefits(self, outcubefits):
+    def mergefits(self, outcubefits, overwrite=False):
         """Merge the ZAP cube into the full muse datacube and write."""
-
         # make sure it has the right extension
         outcubefits = outcubefits.split('.fits')[0] + '.fits'
-        check_file_exists(outcubefits)
         with fits.open(self.musecubefits) as hdu:
             hdu[1].header = _newheader(self)
             hdu[1].data = self.cleancube
-            hdu.writeto(outcubefits)
+            write_hdulist_to(hdu, outcubefits, overwrite=overwrite)
         logger.info('Cube file saved to %s', outcubefits)
 
     def plotvarcurve(self, i=0, ax=None):
@@ -830,6 +819,14 @@ class Zap(object):
 
 
 # ================= Helper Functions =================
+
+if ASTROPY_LT_1_3:
+    # the 'clobber' parameter was renamed to 'overwrite' in 1.3
+    def write_hdulist_to(hdulist, fileobj, overwrite=False, **kwargs):
+        hdulist.writeto(fileobj, clobber=overwrite, **kwargs)
+else:
+    def write_hdulist_to(hdulist, fileobj, overwrite=False, **kwargs):
+        hdulist.writeto(fileobj, overwrite=overwrite, **kwargs)
 
 
 def worker(f, i, chunk, out_q, err_q, kwargs):

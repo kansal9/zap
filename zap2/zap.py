@@ -218,7 +218,8 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
     return zobj
 
 
-def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
+def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cftype='median',
+                cfwidth=100):
     """A multiprocessed implementation of the continuum removal.
 
     This process distributes the data to many processes that then reassemble
@@ -230,8 +231,8 @@ def contsubfits(musecubefits, contsubfn='CONTSUB_CUBE.fits', cfwidth=100):
     check_file_exists(contsubfn)
     with fits.open(musecubefits) as hdu:
         data = hdu[1].data
-        stack = data.reshape(data.shape[0], (data.shape[1] * data.shape[2]))
-        contarray = _continuumfilter(stack, 'median', cfwidth=cfwidth)
+        stack = data.reshape(data.shape[0], -1)
+        contarray = _continuumfilter(stack, cftype, cfwidth=cfwidth)
         # remove continuum features
         stack -= contarray
         hdu[1].data = stack.reshape(data.shape)
@@ -570,11 +571,10 @@ class Zap(object):
             removed
 
         """
-        logger.info('Applying Continuum Filter, cftype=%s, cfwidth=%d',
-                    cftype, cfwidth)
         if cftype not in CFTYPE_OPTIONS:
             raise ValueError("cftype must be weight, median, fit or none, "
                              "got {}".format(cftype))
+        logger.info('Applying Continuum Filter, cftype=%s', cftype)
         self._cftype = cftype
         self._cfwidth = cfwidth
 
@@ -584,16 +584,11 @@ class Zap(object):
 
         # remove continuum features
         if cftype == 'none':
-            self.contarray = np.zeros_like(self.stack)
-        elif cftype == 'fit':
-            x = np.arange(self.stack.shape[0])
-            res = np.polynomial.polynomial.polyfit(x, self.stack, deg=5)
-            ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
-            self.contarray = ret.T
+            self.normstack = self.stack.copy()
         else:
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
-        self.normstack = self.stack - self.contarray
+            self.normstack = self.stack - self.contarray
 
     def _normalize_variance(self):
         """Normalize the variance in the segments."""
@@ -616,7 +611,8 @@ class Zap(object):
         to the individual svd methods.
 
         """
-        logger.info('Calculating SVD on %d segments', len(self.pranges))
+        logger.info('Calculating SVD on %d segments (%s)', len(self.pranges),
+                    self.pranges)
         indices = [x[0] for x in self.pranges[1:]]
         # normstack = self.stack - self.contarray
         Xarr = np.array_split(self.normstack.T, indices, axis=1)
@@ -900,11 +896,18 @@ def _compute_deriv(arr, nsigma=5):
 
 
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
+    if cftype == 'fit':
+        x = np.arange(stack.shape[0])
+        res = np.polynomial.polynomial.polyfit(x, stack, deg=5)
+        ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
+        return ret.T
+
     if cftype == 'median':
         func = _icfmedian
         weight = None
     elif cftype == 'weight':
         func = _icfweight
+    logger.info('Using cfwidth=%d', cfwidth)
     c = parallel_map(func, stack, NCPU, axis=1, weight=weight, cfwidth=cfwidth)
     return np.concatenate(c, axis=1)
 

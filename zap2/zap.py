@@ -894,7 +894,10 @@ def _compute_deriv(arr, nsigma=5):
 def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
     if cftype == 'fit':
         x = np.arange(stack.shape[0])
-        res = np.polynomial.polynomial.polyfit(x, stack, deg=5)
+        # Excluding the very red part for the fit. This is Muse-specific,
+        # but anyway for another instrument this method should probably
+        # not be used as is.
+        res = np.polynomial.polynomial.polyfit(x[:3600], stack[:3600], deg=5)
         ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
         return ret.T
 

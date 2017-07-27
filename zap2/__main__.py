@@ -19,19 +19,16 @@ def main():
            version='%(prog)s ' + __version__)
     addarg('--debug', '-d', action='store_true',
            help='show debug info')
+    addarg('--overwrite', action='store_true',
+           help='overwrite output files if they already exists')
     addarg('--no-clean', action='store_true',
            help='disable NaN values interpolation')
+    addarg('--ncpu', type=int, default=None,
+           help='maximum number of cpus to use, all by default')
+    addarg('--mask', help='mask file to exclude sources')
     addarg('--outcube', '-o', default='DATACUBE_FINAL_ZAP.fits',
            help='output datacube path')
-    addarg('--mask', help='Mask file to exclude sources')
-    addarg('--skycube', help='Sky datacube path')
-    addarg('--extsvd',
-           help='Path of an input FITS file containing a SVD computed in a '
-           'previous step')
-    addarg('--cfwidthSVD', type=int, default=100,
-           help='window size for the continuum filter for the SVD computation')
-    addarg('--cfwidthSP', type=int, default=50,
-           help='window size for the continuum filter')
+    addarg('--skycube', help='output sky datacube path')
     addarg('--zlevel', default='median',
            help='method for the zeroth order sky removal: none, sigclip or '
            'median')
@@ -39,6 +36,11 @@ def main():
            help='method for the continuum filter: {}. For the '
            'weight method, a zeroth order sky is required (see zlevel)'
            .format(', '.join(CFTYPE_OPTIONS)))
+    addarg('--cfwidthSVD', type=int, default=100,
+           help='window size for the median or weight continuum filter, '
+           'for the SVD computation')
+    addarg('--cfwidthSP', type=int, default=50,
+           help='window size for the median or weight continuum filter')
     args = parser.parse_args()
 
     if args.debug:
@@ -47,9 +49,9 @@ def main():
     try:
         process(
             args.incube, outcubefits=args.outcube, clean=not args.no_clean,
-            skycubefits=args.skycube,
-            mask=args.mask, extSVD=args.extsvd, cfwidthSVD=args.cfwidthSVD,
-            cfwidthSP=args.cfwidthSP, zlevel=args.zlevel, cftype=args.cftype)
+            skycubefits=args.skycube, mask=args.mask, zlevel=args.zlevel,
+            cfwidthSVD=args.cfwidthSVD, cfwidthSP=args.cfwidthSP,
+            cftype=args.cftype, overwrite=args.overwrite, ncpu=args.ncpu)
     except KeyboardInterrupt:
         sys.exit('Interrupted!')
     except Exception as e:

@@ -1,0 +1,50 @@
+
+2.0.dev (2017-xx-xx)
+====================
+
+Not released yet.
+
+- Use Scikit-learn's implementation for the PCA instead of the custom one. To
+  reproduce something similar to the previous implementation, it is possible to
+  limit the number of components that are computed (``n_components=0.25``). This
+  impacts the computation of the inflexion point of the variance curve, to find
+  the optimal number of eigenvalues to use.
+
+  With the new default parameters (``n_components=None``), the number of
+  eigenvalues used for the reconstruction is higher. Thus the sky is better
+  subtracted, but the risk of subtracting signal from strong emission lines is
+  also higher. See next point.
+
+- Use only one segment by default. ZAP used to split the wavelength axis in 11
+  segments, but this made the control of the number of eigenvalues more
+  difficult. And this also prevented the PCA to use the correlation between sky
+  lines of different groups. So using only one segment allows to greatly reduce
+  the risk of killing an emission line with the new PCA (which gives a higher
+  number of eigenvalues by default, due to ``n_components``). It is still
+  possible to modify the segments if needed: ``import zap; zap.SKYSEG[:] = [0,
+  5400, ...]``.
+
+- New continuum filter type with a polynomial fit (``cftype='fit'``). Must be
+  used with care though, as the fit can easily go out of control in the red part
+  of the spectrum.
+
+- Change the default median filter width to 300, for the ``median`` and
+  ``weight`` continuum filters. The values used previously, 100 and 50, were too
+  small which explains the background oscillations in the red part of the
+  spectra.
+
+- New parameter (``ncpu``) to set the number of used CPU.
+
+- Remove the possibility to save the SVD result in a FITS file. This is because
+  of the change of PCA implementation. It is still possible to pass the SVD
+  computed by ``SVDoutput`` to ``process``, passing the in-memory object
+  directly without saving it to disk.
+
+- Speed improvements, mostly thanks to the new PCA implementation.
+
+
+1.0 (2016-04-02)
+================
+
+First public release. This is the version described in the 2016MNRAS.458.3210S
+paper.

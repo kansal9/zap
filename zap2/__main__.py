@@ -36,10 +36,10 @@ def main():
            help='method for the continuum filter: {}. For the '
            'weight method, a zeroth order sky is required (see zlevel)'
            .format(', '.join(CFTYPE_OPTIONS)))
-    addarg('--cfwidthSVD', type=int, default=100,
+    addarg('--cfwidthSVD', type=int, default=300,
            help='window size for the median or weight continuum filter, '
            'for the SVD computation')
-    addarg('--cfwidthSP', type=int, default=50,
+    addarg('--cfwidthSP', type=int, default=300,
            help='window size for the median or weight continuum filter')
     args = parser.parse_args()
 

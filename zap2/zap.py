@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 # ================= Top Level Functions =================
 
 def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
-            zlevel='median', cftype='weight', cfwidthSVD=100, cfwidthSP=50,
+            zlevel='median', cftype='weight', cfwidthSVD=300, cfwidthSP=300,
             nevals=[], extSVD=None, skycubefits=None, mask=None,
             interactive=False, ncpu=None, pca_class=None, n_components=None,
             overwrite=False):
@@ -104,12 +104,12 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         order sky is required (see `zlevel`).
     cfwidthSVD : int or float
         Window size for the continuum filter, for the SVD computation.
-        Default to 100.
+        Default to 300.
     cfwidthSP : int or float
         Window size for the continuum filter used to remove the continuum
         features for calculating the eigenvalues per spectrum. Smaller values
         better trace the sources. An optimal range of is typically
-        20 - 50 pixels. Default to 50.
+        20 - 50 pixels. Default to 300.
     nevals : list
         Allow to specify the number of eigenspectra used for each segment.
         Provide either a single value that will be used for all of the
@@ -185,7 +185,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
 
 def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
-              cfwidth=100, mask=None, ncpu=None, pca_class=None,
+              cfwidth=300, mask=None, ncpu=None, pca_class=None,
               n_components=None):
     """Performs the SVD decomposition of a datacube.
 
@@ -227,7 +227,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
 
 
 def contsubfits(cubefits, outfits='CONTSUB_CUBE.fits', ncpu=None,
-                cftype='median', cfwidth=100, clean_nan=True, zlevel='median',
+                cftype='median', cfwidth=300, clean_nan=True, zlevel='median',
                 overwrite=False):
     """A standalone implementation of the continuum removal."""
     if ncpu is not None:
@@ -410,7 +410,7 @@ class Zap(object):
 
     @timeit
     def _prepare(self, clean=True, zlevel='median', cftype='weight',
-                 cfwidth=100, extzlevel=None, mask=None):
+                 cfwidth=300, extzlevel=None, mask=None):
         # Check for consistency between weighted median and zlevel keywords
         if cftype == 'weight' and zlevel == 'none':
             raise ValueError('Weighted median requires a zlevel calculation')
@@ -440,7 +440,7 @@ class Zap(object):
         self._normalize_variance()
 
     def _run(self, clean=True, zlevel='median', cftype='weight',
-             cfwidth=100, nevals=[], extSVD=None):
+             cfwidth=300, nevals=[], extSVD=None):
         """ Perform all steps to ZAP a datacube:
 
         - NaN re/masking,
@@ -557,7 +557,7 @@ class Zap(object):
         self.stack -= self.zlsky[:, np.newaxis]
 
     @timeit
-    def _continuumfilter(self, cfwidth=100, cftype='weight'):
+    def _continuumfilter(self, cfwidth=300, cftype='weight'):
         """A multiprocessed implementation of the continuum removal.
 
         This process distributes the data to many processes that then
@@ -928,7 +928,7 @@ def rolling_window(a, window):  # function for striding to help speed up
     return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
 
 
-def wmedian(spec, wt, cfwidth=100):
+def wmedian(spec, wt, cfwidth=300):
     """Performs a weighted median filtering of a 1d spectrum.
 
     Operates using a cumulative sum curve.
@@ -941,7 +941,7 @@ def wmedian(spec, wt, cfwidth=100):
         A spectrum of equal length as the input array to provide the weights.
     cfwidth : int or float
         Window size for the continuum filter, for the SVD computation.
-        Default to 100.
+        Default to 300.
 
     """
     # ignore the warning (feature not a bug)

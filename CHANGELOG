@@ -1,10 +1,13 @@
 
 2.0.dev (2017-xx-xx)
-====================
+--------------------
 
 Not released yet.
 
-- Use Scikit-learn's implementation for the PCA instead of the custom one. To
+- Use *Scikit-learn*'s implementation for the PCA instead of the custom one.
+  This solved a major issue with spatial variations introduced by zap. Also it
+  is much faster than the previous implementation. A drawback however is that it
+  is no more possible to save the SVD file. To
   reproduce something similar to the previous implementation, it is possible to
   limit the number of components that are computed (``n_components=0.25``). This
   impacts the computation of the inflexion point of the variance curve, to find
@@ -15,14 +18,23 @@ Not released yet.
   subtracted, but the risk of subtracting signal from strong emission lines is
   also higher. See next point.
 
-- Use only one segment by default. ZAP used to split the wavelength axis in 11
-  segments, but this made the control of the number of eigenvalues more
-  difficult. And this also prevented the PCA to use the correlation between sky
-  lines of different groups. So using only one segment allows to greatly reduce
-  the risk of killing an emission line with the new PCA (which gives a higher
-  number of eigenvalues by default, due to ``n_components``). It is still
-  possible to modify the segments if needed: ``import zap; zap.SKYSEG[:] = [0,
-  5400, ...]``.
+- Use only one *sky segment* by default, which means that the cube is
+  no more split on the wavelength axis. Originally zap used 11 segments, whose
+  goals were to have coherent groups of sky emission lines, with a smaller
+  number of eigenvalues per segment. And it also allowed to parallelize the
+  computation. But, the segments were also responsible for continuum
+  oscillations, and made the choice of the number of eigenvalues per segment
+  very difficult and very sensitive. With only one segment the performance of
+  the sky subtraction is much better, thanks to the higher correlation between
+  sky lines on the whole wavelength range.
+
+  So using only one segment allows to greatly reduce the risk of killing an
+  emission line with the new PCA (which gives a higher number of eigenvalues by
+  default, due to ``n_components``). It is still possible to modify the segments
+  if needed::
+
+    import zap
+    zap.SKYSEG[:] = [0, 5400, ..., 10000]
 
 - New continuum filter type with a polynomial fit (``cftype='fit'``). Must be
   used with care though, as the fit can easily go out of control in the red part
@@ -44,7 +56,7 @@ Not released yet.
 
 
 1.0 (2016-04-02)
-================
+----------------
 
 First public release. This is the version described in the 2016MNRAS.458.3210S
 paper.

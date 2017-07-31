@@ -13,11 +13,17 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 pkgmeta = {}
-zapdir = os.path.join('..', 'zap')
-execfile(os.path.join(zapdir, 'version.py'), pkgmeta)
+zapdir = os.path.join(os.path.dirname(__file__), '..', 'zap2')
+
+with open(os.path.join(zapdir, 'version.py')) as f:
+    code = compile(f.read(), 'version.py', 'exec')
+    exec(code, pkgmeta)
+
 if pkgmeta['__version__'].endswith('.dev') and \
         os.path.isfile(os.path.join(zapdir, '_githash.py')):
-    execfile(os.path.join(zapdir, '_githash.py'), pkgmeta)
+    with open(os.path.join(zapdir, '_githash.py')) as f:
+        code = compile(f.read(), '_githash.py', 'exec')
+        exec(code, pkgmeta)
     pkgmeta['__version__'] += pkgmeta['__dev_value__']
 
 # -- General configuration ----------------------------------------------------
@@ -31,7 +37,9 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
-    'numpydoc',
+    'sphinx.ext.napoleon',
+    # 'numpydoc',
+    # 'sphinx_automodapi.automodapi',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -47,8 +55,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'zap'
-copyright = u'2014, Kurt Soto, Simon Lilly'
+project = u'zap2'
+copyright = u'2014-2017, Kurt Soto, Simon Conseil'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -73,8 +81,8 @@ release = pkgmeta['__version__']
 # directories to ignore when looking for source files.
 exclude_patterns = ['_build']
 
-# The reST default role (used for this markup: `text`) to use for all documents.
-#default_role = None
+# The reST default role (used for this markup: `text`) to use for all documents
+default_role = 'obj'
 
 # If true, '()' will be appended to :func: etc. cross-reference text.
 #add_function_parentheses = True
@@ -96,9 +104,16 @@ pygments_style = 'sphinx'
 
 # -- Options for HTML output ---------------------------------------------------
 
+on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
+
+if not on_rtd:  # only import and set the theme if we're building docs locally
+    import sphinx_rtd_theme
+    html_theme = "sphinx_rtd_theme"
+    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'nature'
+# html_theme = 'alabaster'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -127,7 +142,7 @@ html_theme = 'nature'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# html_static_path = ['_static']
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
@@ -138,7 +153,10 @@ html_static_path = ['_static']
 #html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-#html_sidebars = {}
+# html_sidebars = {
+#    '**': ['localtoc.html', #'globaltoc.html',
+#           'sourcelink.html', 'searchbox.html'],
+# }
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
@@ -171,83 +189,7 @@ html_static_path = ['_static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'zapdoc'
-
-
-# -- Options for LaTeX output --------------------------------------------------
-
-latex_elements = {
-# The paper size ('letterpaper' or 'a4paper').
-#'papersize': 'letterpaper',
-
-# The font size ('10pt', '11pt' or '12pt').
-#'pointsize': '10pt',
-
-# Additional stuff for the LaTeX preamble.
-#'preamble': '',
-}
-
-# Grouping the document tree into LaTeX files. List of tuples
-# (source start file, target name, title, author, documentclass [howto/manual]).
-latex_documents = [
-  ('index', 'zap.tex', u'zap Documentation',
-   u'Kurt Soto', 'manual'),
-]
-
-# The name of an image file (relative to this directory) to place at the top of
-# the title page.
-#latex_logo = None
-
-# For "manual" documents, if this is true, then toplevel headings are parts,
-# not chapters.
-#latex_use_parts = False
-
-# If true, show page references after internal links.
-#latex_show_pagerefs = False
-
-# If true, show URL addresses after external links.
-#latex_show_urls = False
-
-# Documents to append as an appendix to all manuals.
-#latex_appendices = []
-
-# If false, no module index is generated.
-#latex_domain_indices = True
-
-
-# -- Options for manual page output --------------------------------------------
-
-# One entry per manual page. List of tuples
-# (source start file, name, description, authors, manual section).
-man_pages = [
-    ('index', 'zap', u'zap Documentation',
-     [u'Kurt Soto'], 1)
-]
-
-# If true, show URL addresses after external links.
-#man_show_urls = False
-
-
-# -- Options for Texinfo output ------------------------------------------------
-
-# Grouping the document tree into Texinfo files. List of tuples
-# (source start file, target name, title, author,
-#  dir menu entry, description, category)
-texinfo_documents = [
-  ('index', 'zap', u'zap Documentation',
-   u'Kurt Soto', 'zap', 'One line description of project.',
-   'Miscellaneous'),
-]
-
-# Documents to append as an appendix to all manuals.
-#texinfo_appendices = []
-
-# If false, no module index is generated.
-#texinfo_domain_indices = True
-
-# How to display URL addresses: 'footnote', 'no', or 'inline'.
-#texinfo_show_urls = 'footnote'
-
+htmlhelp_basename = 'zap2doc'
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {'http://docs.python.org/': None}

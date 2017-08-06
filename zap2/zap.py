@@ -355,6 +355,12 @@ class Zap(object):
             # Make sure lambda is in angstroms
             self.laxis = (self.laxis * unit).to(u.angstrom).value
 
+        #Change laser region into zeros if AO
+        if((hdul[0].header['HIERARCH ESO INS MODE'])[:-1]=='WFM-AO-'):
+            logger.info('Cleaning laser region for AO')
+            ksel=np.where((self.laxis>5803.) & (self.laxis<5967.))
+            self.cube[ksel]=0.0
+
         # NaN Cleaning
         self.run_clean = False
         self.nancube = None

@@ -53,6 +53,12 @@ SKYSEG = [0, 10000]
 # and may be useful for further testing.
 # [0, 5400, 5850, 6440, 6750, 7200, 7700, 8265, 8602, 8731, 9275, 10000]
 
+# range where the NaD notch filters absorbs significant flux
+NOTCH_FILTER_RANGES = {
+    'WFM-AO-E': [5755, 6008],
+    'WFM-AO-N': [5805, 5966]
+}
+
 # List of allowed values for cftype (continuum filter)
 CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
 
@@ -357,9 +363,11 @@ class Zap(object):
             self.laxis = (self.laxis * unit).to(u.angstrom).value
 
         # Change laser region into zeros if AO
-        if ins_mode[:-1] == 'WFM-AO-':
-            logger.info('Cleaning laser region for AO')
-            ksel = ((self.laxis > 5803.) & (self.laxis < 5967.))
+        if ins_mode in NOTCH_FILTER_RANGES:
+            logger.info('Cleaning laser region for AO, mode=%s, limits=%s',
+                        ins_mode, NOTCH_FILTER_RANGES[ins_mode])
+            lmin, lmax = NOTCH_FILTER_RANGES[ins_mode]
+            ksel = ((self.laxis > lmin - 2) & (self.laxis < lmax + 2))
             self.cube[ksel] = 0.0
 
         # NaN Cleaning

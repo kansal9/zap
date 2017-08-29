@@ -338,6 +338,7 @@ class Zap(object):
     def __init__(self, musecubefits, pca_class=None, n_components=None):
         self.musecubefits = musecubefits
         with fits.open(musecubefits) as hdul:
+            ins_mode = hdul[0].header['HIERARCH ESO INS MODE']
             self.cube = hdul[1].data
             self.header = hdul[1].header
 
@@ -355,11 +356,11 @@ class Zap(object):
             # Make sure lambda is in angstroms
             self.laxis = (self.laxis * unit).to(u.angstrom).value
 
-        #Change laser region into zeros if AO
-        if((hdul[0].header['HIERARCH ESO INS MODE'])[:-1]=='WFM-AO-'):
+        # Change laser region into zeros if AO
+        if ins_mode[:-1] == 'WFM-AO-':
             logger.info('Cleaning laser region for AO')
-            ksel=np.where((self.laxis>5803.) & (self.laxis<5967.))
-            self.cube[ksel]=0.0
+            ksel = ((self.laxis > 5803.) & (self.laxis < 5967.))
+            self.cube[ksel] = 0.0
 
         # NaN Cleaning
         self.run_clean = False
@@ -629,7 +630,7 @@ class Zap(object):
         self.models = []
         for i, x in enumerate(Xarr):
             if self.n_components is not None:
-                ncomp = max(x.shape[1]*self.n_components, 60)
+                ncomp = max(x.shape[1] * self.n_components, 60)
                 logger.info('Segment %d, computing %d eigenvectors out of %d',
                             i, ncomp, x.shape[1])
             else:
@@ -672,7 +673,7 @@ class Zap(object):
 
         self.nevals = nevals
         for i, model in enumerate(self.models):
-                model.components_ = self.components[i][start[i]:end[i]]
+            model.components_ = self.components[i][start[i]:end[i]]
 
     @timeit
     def reconstruct(self):
@@ -802,7 +803,7 @@ class Zap(object):
         ax1.set_ylabel('Variance')
 
         ax2.plot(np.arange(deriv.size), deriv)
-        ax2.hlines([mn1, mn1-std1], 0, len(deriv), colors=('k', '0.5'))
+        ax2.hlines([mn1, mn1 - std1], 0, len(deriv), colors=('k', '0.5'))
         ax2.plot([self.nevals[i] - 1, self.nevals[i] - 1],
                  [min(deriv), max(deriv)])
         ax2.set_ylabel('d/dn Var')
@@ -820,7 +821,7 @@ class Zap(object):
     def plotvarcurves(self):
         nseg = len(self.models)
         import matplotlib.pyplot as plt
-        fig, axes = plt.subplots(nseg, 3, figsize=(16, nseg*2),
+        fig, axes = plt.subplots(nseg, 3, figsize=(16, nseg * 2),
                                  tight_layout=True)
         for i in range(nseg):
             self.plotvarcurve(i=i, ax=axes[i])

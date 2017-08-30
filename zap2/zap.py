@@ -187,9 +187,9 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         return zobj
 
     if skycubefits is not None:
-        zobj.writeskycube(skycubefits=skycubefits)
+        zobj.writeskycube(skycubefits=skycubefits, overwrite=overwrite)
 
-    zobj.mergefits(outcubefits)
+    zobj.mergefits(outcubefits, overwrite=overwrite)
     logger.info('Zapped! (took %.2f sec.)', time() - t0)
 
 
@@ -344,7 +344,7 @@ class Zap(object):
     def __init__(self, musecubefits, pca_class=None, n_components=None):
         self.musecubefits = musecubefits
         with fits.open(musecubefits) as hdul:
-            ins_mode = hdul[0].header['HIERARCH ESO INS MODE']
+            self.ins_mode = hdul[0].header['HIERARCH ESO INS MODE']
             self.cube = hdul[1].data
             self.header = hdul[1].header
 
@@ -363,12 +363,13 @@ class Zap(object):
             self.laxis = (self.laxis * unit).to(u.angstrom).value
 
         # Change laser region into zeros if AO
-        if ins_mode in NOTCH_FILTER_RANGES:
+        if self.ins_mode in NOTCH_FILTER_RANGES:
             logger.info('Cleaning laser region for AO, mode=%s, limits=%s',
-                        ins_mode, NOTCH_FILTER_RANGES[ins_mode])
-            lmin, lmax = NOTCH_FILTER_RANGES[ins_mode]
-            ksel = ((self.laxis > lmin - 2) & (self.laxis < lmax + 2))
-            self.cube[ksel] = 0.0
+                        self.ins_mode, NOTCH_FILTER_RANGES[self.ins_mode])
+            self.notch_limits = self.wcs.all_world2pix(
+                NOTCH_FILTER_RANGES[self.ins_mode], 0)[0].astype(int)
+            lmin, lmax = self.notch_limits
+            self.cube[lmin:lmax + 1] = 0.0
 
         # NaN Cleaning
         self.run_clean = False
@@ -707,6 +708,9 @@ class Zap(object):
         cube[:, self.y, self.x] = stack
         if with_nans:
             cube[self.nancube] = np.nan
+        if self.ins_mode in NOTCH_FILTER_RANGES:
+            lmin, lmax = self.notch_limits
+            cube[lmin:lmax + 1] = np.nan
         return cube
 
     def remold(self):

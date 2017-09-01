@@ -24,7 +24,7 @@ Links
 
 - `documentation <http://zap.readthedocs.io/en/latest/>`_
 
-- `git repository <https://git-cral.univ-lyon1.fr/MUSE/zap2>`_
+- `git repository <https://github.com/musevlt/zap2>`_
 
 - changelog_
 
@@ -39,5 +39,5 @@ Please cite ZAP as::
 \bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S} Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.\ 2016, \mnras, 458, 3210
 
 .. _zap: https://github.com/ktsoto/zap
-.. _changelog: https://git-cral.univ-lyon1.fr/MUSE/zap2/blob/master/CHANGELOG
+.. _changelog: https://github.com/musevlt/zap2/blob/master/CHANGELOG
 .. _sklearn.decomposition.PCA: http://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html#sklearn.decomposition.PCA

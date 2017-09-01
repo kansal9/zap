@@ -40,7 +40,7 @@ setup(
     description=__description__,
     author='Simon Conseil',
     author_email='simon.conseil@univ-lyon1.fr',
-    url='https://git-cral.univ-lyon1.fr/MUSE/zap2',
+    url='https://github.com/musevlt/zap2',
     license='MIT',
     packages=find_packages(),
     include_package_data=True,

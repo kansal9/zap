@@ -4,7 +4,8 @@ ZAP2 (the Zurich Atmosphere Purge reloaded)
 Tired of sky subtraction residuals? ZAP them!
 
 This repository is a fork of the original zap_, developed by Kurt Soto. The
-differences with the original software are listed in the changelog_.
+differences with the original software are listed in the changelog_. This
+version is also compatible with the AO mode.
 
 ZAP is a high precision sky subtraction tool which can be used as complete sky
 subtraction solution, or as an enhancement to previously sky-subtracted MUSE

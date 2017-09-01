@@ -43,7 +43,7 @@ from time import time
 from .version import __version__
 
 __all__ = ['process', 'SVDoutput', 'nancleanfits', 'contsubfits', 'Zap',
-           'wmedian']
+           'wmedian', 'SKYSEG']
 
 # Limits of the segments in Angstroms. Zap now uses by default only one
 # segment, see below for the old values.

@@ -4,14 +4,16 @@
 
 Not released yet.
 
+- Compatibility with the AO mode.
+
 - Use *Scikit-learn*'s implementation for the PCA instead of the custom one.
   This solved a major issue with spatial variations introduced by zap. Also it
-  is much faster than the previous implementation. A drawback however is that it
-  is no more possible to save the SVD file. To
-  reproduce something similar to the previous implementation, it is possible to
-  limit the number of components that are computed (``n_components=0.25``). This
-  impacts the computation of the inflexion point of the variance curve, to find
-  the optimal number of eigenvalues to use.
+  is much faster than the previous implementation. A drawback however is that
+  it is no more possible to save the SVD file. To reproduce something similar
+  to the previous implementation, it is possible to limit the number of
+  components that are computed (``n_components=0.25``). This impacts the
+  computation of the inflexion point of the variance curve, to find the optimal
+  number of eigenvalues to use.
 
   With the new default parameters (``n_components=None``), the number of
   eigenvalues used for the reconstruction is higher. Thus the sky is better
@@ -33,8 +35,8 @@ Not released yet.
   default, due to ``n_components``). It is still possible to modify the segments
   if needed::
 
-    import zap
-    zap.SKYSEG[:] = [0, 5400, ..., 10000]
+    from zap2.zap import SKYSEG
+    SKYSEG[:] = [0, 5400, ..., 10000]
 
 - New continuum filter type with a polynomial fit (``cftype='fit'``). Must be
   used with care though, as the fit can easily go out of control in the red part
@@ -53,6 +55,8 @@ Not released yet.
   directly without saving it to disk.
 
 - Speed improvements, mostly thanks to the new PCA implementation.
+
+- New parameter to save the explained variance curves.
 
 
 1.0 (2016-04-02)

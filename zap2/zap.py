@@ -86,7 +86,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=300, cfwidthSP=300,
             nevals=[], extSVD=None, skycubefits=None, mask=None,
             interactive=False, ncpu=None, pca_class=None, n_components=None,
-            overwrite=False):
+            overwrite=False, varcurvefits=None):
     """ Performs the entire ZAP sky subtraction algorithm.
 
     This is the main ZAP function. It works on an input FITS file and
@@ -143,8 +143,10 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         the ZAP process is returned, and can be used to explore the
         eigenspectra and recompute the output (with the
         :meth:`~zap.Zap.reprocess` method). In this case, the output files
-        are not saved (`outcubefits` and `skycubefits` are ignored). Default to
-        False.
+        are not saved (`outcubefits` and `skycubefits` are ignored). Default
+        to False.
+    varcurvefits : str
+        Path for the optional output of the explained variance curves.
 
     """
     logger.info('Running ZAP %s !', __version__)
@@ -188,6 +190,9 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
     if skycubefits is not None:
         zobj.writeskycube(skycubefits=skycubefits, overwrite=overwrite)
+
+    if varcurvefits is not None:
+        zobj.writevarcurve(varcurvefits=varcurvefits, overwrite=overwrite)
 
     zobj.mergefits(outcubefits, overwrite=overwrite)
     logger.info('Zapped! (took %.2f sec.)', time() - t0)
@@ -791,6 +796,15 @@ class Zap(object):
         write_hdulist_to(outhdu, skycubefits, overwrite=overwrite)
         logger.info('Sky cube file saved to %s', skycubefits)
 
+    def writevarcurve(self, varcurvefits='VARCURVE_ZAP.fits', overwrite=False):
+        """Write the explained variance curves to an individual fits file."""
+        from astropy.table import Table
+        table = Table([m.explained_variance_ for m in self.models])
+        hdu = fits.table_to_hdu(table)
+        _newheader(self, hdu.header)
+        write_hdulist_to(hdu, varcurvefits, overwrite=overwrite)
+        logger.info('Variance curve file saved to %s', varcurvefits)
+
     def mergefits(self, outcubefits, overwrite=False):
         """Merge the ZAP cube into the full muse datacube and write."""
         # make sure it has the right extension
@@ -1005,9 +1019,9 @@ def wmedian(spec, wt, cfwidth=300):
     return wmed
 
 
-def _newheader(zobj):
+def _newheader(zobj, header=None):
     """Put the pertinent zap parameters into the header"""
-    header = zobj.header.copy()
+    header = header or zobj.header.copy()
     header['COMMENT'] = 'These data have been ZAPped!'
     header.append(('ZAPvers', __version__, 'ZAP version'), end=True)
     # zlevel removal performed

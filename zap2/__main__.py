@@ -29,6 +29,7 @@ def main():
     addarg('--outcube', '-o', default='DATACUBE_FINAL_ZAP.fits',
            help='output datacube path')
     addarg('--skycube', help='output sky datacube path')
+    addarg('--varcurve', help='output variance curves')
     addarg('--zlevel', default='median',
            help='method for the zeroth order sky removal: none, sigclip or '
            'median')
@@ -51,7 +52,8 @@ def main():
             args.incube, outcubefits=args.outcube, clean=not args.no_clean,
             skycubefits=args.skycube, mask=args.mask, zlevel=args.zlevel,
             cfwidthSVD=args.cfwidthSVD, cfwidthSP=args.cfwidthSP,
-            cftype=args.cftype, overwrite=args.overwrite, ncpu=args.ncpu)
+            cftype=args.cftype, overwrite=args.overwrite, ncpu=args.ncpu,
+            varcurvefits=args.varcurve)
     except KeyboardInterrupt:
         sys.exit('Interrupted!')
     except Exception as e:

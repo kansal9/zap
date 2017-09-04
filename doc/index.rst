@@ -16,30 +16,34 @@ flatfielding of the data in a MUSE exposure, better results are obtained when
 these corrections are made ahead of time. Future development will include
 expansion to more instruments.
 
+The paper describing the original method can be found here:
+http://adsabs.harvard.edu/abs/2016MNRAS.458.3210S
+
+Please cite ZAP as::
+
+\bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S} Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.\ 2016, \mnras, 458, 3210
+
 Installation
 ============
 
-Requirements
-------------
-
 ZAP requires the following packages:
 
-* Numpy 1.6.0 or later
-* Astropy v1.0 or later
-* SciPy v0.13.3 or later
+* Numpy (1.6.0 or later)
+* Astropy (1.0 or later)
+* SciPy (0.13.3 or later)
 * Scikit-learn
 
 Many linear algebra operations are performed in ZAP, so it can be beneficial to
 use an alternative BLAS package. In the Anaconda distribution, the default BLAS
 comes with Numpy linked to MKL, which can amount to a 20% speedup of ZAP.
 
-Steps
------
-
-ZAP can be installed using pip ::
+The last stable release of ZAP can be installed simply with pip::
 
     pip install zap
 
+Or into the user path with::
+
+    pip install --user zap
 
 Usage
 =====
@@ -55,7 +59,7 @@ Care should be taken, however, since this case assumes a sparse field, and
 better results can be obtained by applying masks.
 
 There are a number of options that can be passed to the code which we describe
-here:
+below.
 
 Sparse Field Case
 -----------------
@@ -92,6 +96,24 @@ An example of running the code in this way is as follows::
 The integration time of this frame does not need to be the same as the object
 exposure, but rather just a 2-3 minute exposure.
 
+Optimal number of eigenvectors
+------------------------------
+
+The major difficulty to get a high quality sky subtraction is to find the
+optimal number of eigenvalues to use. ZAP provides an automated way for this,
+trying to find the inflexion point of the variance curve. This is one way to do
+it, but there is no right answer to this issue. A higher number of eigenvalues
+used for the reconstruction will give a better sky subtraction, but with the
+risk of subtracting signal from strong emission lines.
+
+The first thing one can do to optimize the PCA quality is to use a good mask, to
+avoid incorporating signal from astronomical sources in the eigenvectors. Then
+it is highly recommended to have a look at the explained variance curves (which
+can be saved with the ``varcurvefits`` parameter) and the selected number of
+eigenvalues (saved in the FITS headers in ``ZAPNEV*``). It is also possible to
+use the interactive mode (see below) to try different number of eigenvectors.
+This number can be specified manually with the ``neval`` parameter.
+
 
 Command Line Interface
 ======================
@@ -109,7 +131,7 @@ command ::
 Interactive mode
 ================
 
-ZAP can also  be used interactively from within IPython ::
+ZAP can be used interactively from the Python console::
 
     import zap
     zobj = zap.process('INPUT.fits', interactive=True)

@@ -349,7 +349,7 @@ class Zap(object):
     def __init__(self, musecubefits, pca_class=None, n_components=None):
         self.musecubefits = musecubefits
         with fits.open(musecubefits) as hdul:
-            self.ins_mode = hdul[0].header['HIERARCH ESO INS MODE']
+            self.ins_mode = hdul[0].header.get('HIERARCH ESO INS MODE')
             self.cube = hdul[1].data
             self.header = hdul[1].header
 

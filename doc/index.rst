@@ -33,11 +33,12 @@ Many linear algebra operations are performed in ZAP, so it can be beneficial to
 use an alternative BLAS package. In the Anaconda distribution, the default BLAS
 comes with Numpy linked to MKL, which can amount to a 20% speedup of ZAP.
 
-..
-    Steps
-    -----
-    ZAP can be installed using pip ::
-        pip install zap
+Steps
+-----
+
+ZAP can be installed using pip ::
+
+    pip install zap
 
 
 Usage

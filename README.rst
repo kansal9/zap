@@ -3,21 +3,19 @@ ZAP (the Zurich Atmosphere Purge reloaded)
 
 Tired of sky subtraction residuals? ZAP them!
 
-This repository is a fork of the original zap_, developed by Kurt Soto. The
-differences with the original software are listed in the changelog_. This
-version is also compatible with the AO mode.
-
 ZAP is a high precision sky subtraction tool which can be used as complete sky
 subtraction solution, or as an enhancement to previously sky-subtracted MUSE
 data.  The method uses PCA to isolate the residual sky subtraction features and
 remove them from the observed datacube. Future developments will include
 modification for use on a variety of instruments.
 
-..
-    The last stable release of ZAP can be installed simply with::
-        pip install zap
-    Or into the user path with::
-        pip install --user zap
+The last stable release of ZAP can be installed simply with::
+
+    pip install zap
+
+Or into the user path with::
+
+    pip install --user zap
 
 
 Links

@@ -920,8 +920,9 @@ def parallel_map(func, arr, indices, **kwargs):
 
 def _compute_deriv(arr, nsigma=5):
     """Compute statistics on the derivatives"""
-    deriv = np.diff(arr)
-    ind = int(.15 * arr.size)
+    npix = int(0.25 * arr.shape[0])
+    deriv = np.diff(arr[:npix])
+    ind = int(.15 * deriv.size)
     mn1 = deriv[ind:].mean()
     std1 = deriv[ind:].std() * nsigma
     return deriv, mn1, std1

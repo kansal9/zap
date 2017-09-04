@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 pkgmeta = {}
-zapdir = os.path.join(os.path.dirname(__file__), '..', 'zap2')
+zapdir = os.path.join(os.path.dirname(__file__), '..', 'zap')
 
 with open(os.path.join(zapdir, 'version.py')) as f:
     code = compile(f.read(), 'version.py', 'exec')
@@ -55,7 +55,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'zap2'
+project = u'zap'
 copyright = u'2014-2017, Kurt Soto, Simon Conseil'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -189,7 +189,7 @@ if not on_rtd:  # only import and set the theme if we're building docs locally
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'zap2doc'
+htmlhelp_basename = 'zapdoc'
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {'http://docs.python.org/': None}

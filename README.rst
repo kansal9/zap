@@ -1,4 +1,4 @@
-ZAP2 (the Zurich Atmosphere Purge reloaded)
+ZAP (the Zurich Atmosphere Purge reloaded)
 -------------------------------------------
 
 Tired of sky subtraction residuals? ZAP them!
@@ -15,9 +15,9 @@ modification for use on a variety of instruments.
 
 ..
     The last stable release of ZAP can be installed simply with::
-        pip install zap2
+        pip install zap
     Or into the user path with::
-        pip install --user zap2
+        pip install --user zap
 
 
 Links
@@ -25,7 +25,7 @@ Links
 
 - `documentation <http://zap.readthedocs.io/en/latest/>`_
 
-- `git repository <https://github.com/musevlt/zap2>`_
+- `git repository <https://github.com/musevlt/zap>`_
 
 - changelog_
 
@@ -40,5 +40,5 @@ Please cite ZAP as::
 \bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S} Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.\ 2016, \mnras, 458, 3210
 
 .. _zap: https://github.com/ktsoto/zap
-.. _changelog: https://github.com/musevlt/zap2/blob/master/CHANGELOG
+.. _changelog: https://github.com/musevlt/zap/blob/master/CHANGELOG
 .. _sklearn.decomposition.PCA: http://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html#sklearn.decomposition.PCA

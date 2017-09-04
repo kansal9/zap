@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 # Read version.py
 __version__ = None
 __description__ = None
-with open('zap2/version.py') as f:
+with open('zap/version.py') as f:
     exec(f.read())
 
 # If the version is not stable, we can add a git hash to the __version__
@@ -26,7 +26,7 @@ if '.dev' in __version__:
         pass
     else:
         # We write the git hash and value so that they gets frozen if installed
-        with open(os.path.join('zap2', '_githash.py'), 'w') as f:
+        with open(os.path.join('zap', '_githash.py'), 'w') as f:
             f.write("__githash__ = \"{}\"\n".format(commit_hash))
             f.write("__dev_value__ = \"{}\"\n".format(commit_number))
 
@@ -35,12 +35,12 @@ if '.dev' in __version__:
 
 
 setup(
-    name='zap2',
+    name='zap',
     version=__version__,
     description=__description__,
     author='Simon Conseil',
     author_email='simon.conseil@univ-lyon1.fr',
-    url='https://github.com/musevlt/zap2',
+    url='https://github.com/musevlt/zap',
     license='MIT',
     packages=find_packages(),
     include_package_data=True,
@@ -48,6 +48,6 @@ setup(
     install_requires=['numpy', 'scipy', 'astropy', 'scikit-learn'],
     extras_require={'plot': ['matplotlib']},
     entry_points={
-        'console_scripts': ['zap2 = zap2.__main__:main']
+        'console_scripts': ['zap = zap.__main__:main']
     },
 )

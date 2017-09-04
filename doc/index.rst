@@ -1,5 +1,5 @@
 ================================
-Welcome to ZAP2's documentation!
+Welcome to ZAP's documentation!
 ================================
 
 .. toctree::
@@ -7,11 +7,11 @@ Welcome to ZAP2's documentation!
 
 Tired of sky subtraction residuals? ZAP them!
 
-ZAP2 (the *Zurich Atmosphere Purge*) is a high precision sky subtraction tool
+ZAP (the *Zurich Atmosphere Purge*) is a high precision sky subtraction tool
 which can be used as complete sky subtraction solution, or as an enhancement to
 previously sky-subtracted MUSE integral field spectroscopic data.  The method
 uses PCA to isolate the residual sky subtraction features and remove them from
-the observed datacube. Though the operation of ZAP2 is not dependent on perfect
+the observed datacube. Though the operation of ZAP is not dependent on perfect
 flatfielding of the data in a MUSE exposure, better results are obtained when
 these corrections are made ahead of time. Future development will include
 expansion to more instruments.
@@ -22,33 +22,33 @@ Installation
 Requirements
 ------------
 
-ZAP2 requires the following packages:
+ZAP requires the following packages:
 
 * Numpy 1.6.0 or later
 * Astropy v1.0 or later
 * SciPy v0.13.3 or later
 * Scikit-learn
 
-Many linear algebra operations are performed in ZAP2, so it can be beneficial to
+Many linear algebra operations are performed in ZAP, so it can be beneficial to
 use an alternative BLAS package. In the Anaconda distribution, the default BLAS
-comes with Numpy linked to MKL, which can amount to a 20% speedup of ZAP2.
+comes with Numpy linked to MKL, which can amount to a 20% speedup of ZAP.
 
 ..
     Steps
     -----
-    ZAP2 can be installed using pip ::
-        pip install zap2
+    ZAP can be installed using pip ::
+        pip install zap
 
 
 Usage
 =====
 
-In its most hands-off form, ZAP2 can take an input FITS datacube, operate on it,
+In its most hands-off form, ZAP can take an input FITS datacube, operate on it,
 and output a final FITS datacube. The main function to do this is
-`zap2.process`::
+`zap.process`::
 
-    import zap2
-    zap2.process('INPUT.fits', outcubefits='OUTPUT.fits')
+    import zap
+    zap.process('INPUT.fits', outcubefits='OUTPUT.fits')
 
 Care should be taken, however, since this case assumes a sparse field, and
 better results can be obtained by applying masks.
@@ -62,7 +62,7 @@ Sparse Field Case
 This case specifically refers to the case where the sky can be measured in the
 sky frame itself, using::
 
-    zap2.process('INPUT.fits', outcubefits='OUTPUT.fits')
+    zap.process('INPUT.fits', outcubefits='OUTPUT.fits')
 
 In both cases, the code will create a resulting processed datacube named
 ``DATACUBE_ZAP.fits`` in the current directory. While this can work well in the
@@ -73,7 +73,7 @@ image matching the spatial dimensions of the input datacube. Masks are defined
 to be >= 1 on astronomical sources and 0 at the position of the sky. Set this
 parameter with the ``mask`` keyword ::
 
-    zap2.process('INPUT.fits', outcubefits='OUTPUT.fits', mask='mask.fits')
+    zap.process('INPUT.fits', outcubefits='OUTPUT.fits', mask='mask.fits')
 
 Filled Field Case
 -----------------
@@ -81,12 +81,12 @@ Filled Field Case
 This approach also can address the saturated field case and is robust in the
 case of strong emission lines, in this case the input is an offset sky
 observation. To achieve this, we calculate the SVD on an external sky frame
-using the function `zap2.SVDoutput`.
+using the function `zap.SVDoutput`.
 
 An example of running the code in this way is as follows::
 
-    extSVD = zap2.SVDoutput('Offset_Field_CUBE.fits', mask='mask.fits')
-    zap2.process('Source_cube.fits', outcubefits='OUTPUT.fits', extSVD=extSVD)
+    extSVD = zap.SVDoutput('Offset_Field_CUBE.fits', mask='mask.fits')
+    zap.process('Source_cube.fits', outcubefits='OUTPUT.fits', extSVD=extSVD)
 
 The integration time of this frame does not need to be the same as the object
 exposure, but rather just a 2-3 minute exposure.
@@ -95,37 +95,37 @@ exposure, but rather just a 2-3 minute exposure.
 Command Line Interface
 ======================
 
-ZAP2 can also be used from the command line::
+ZAP can also be used from the command line::
 
-    python -m zap2 INPUT_CUBE.fits
+    python -m zap INPUT_CUBE.fits
 
 More information use of the command line interface can be found with the
 command ::
 
-    python -m zap2 -h
+    python -m zap -h
 
 
 Interactive mode
 ================
 
-ZAP2 can also  be used interactively from within IPython ::
+ZAP can also  be used interactively from within IPython ::
 
-    import zap2
-    zobj = zap2.process('INPUT.fits', interactive=True)
+    import zap
+    zobj = zap.process('INPUT.fits', interactive=True)
 
 The run method operates on the datacube, and retains all of the data and methods
-necessary to process a final data cube in a Python class named `~zap2.Zap`. You
-can elect to investigate the data product via the `~zap2.Zap` object, and even
+necessary to process a final data cube in a Python class named `~zap.Zap`. You
+can elect to investigate the data product via the `~zap.Zap` object, and even
 reprocess the cube with a different number of eigenspectra per region.
 A workflow may go as follows:
 
 .. code-block:: python
 
-  import zap2
+  import zap
   from matplotlib import pyplot as plt
 
-  # allow ZAP2 to run the optimize routine
-  zobj = zap2.process('INPUT.fits', interactive=True)
+  # allow ZAP to run the optimize routine
+  zobj = zap.process('INPUT.fits', interactive=True)
 
   # plot the variance curves and the selection of the number of eigenspectra used
   zobj.plotvarcurve()
@@ -134,7 +134,7 @@ A workflow may go as follows:
   plt.figure()
   plt.plot(zobj.cube[:,50:100,50:100].sum(axis=(1,2)), 'b', alpha=0.3)
 
-  # plot a spectrum of the cleaned ZAP2 dataproduct
+  # plot a spectrum of the cleaned ZAP dataproduct
   plt.plot(zobj.cleancube[:,50:100,50:100].sum(axis=(1,2)), 'g')
 
   # choose just the first 3 spectra for all segments
@@ -143,7 +143,7 @@ A workflow may go as follows:
   # plot a spectrum extracted from the original cube
   plt.plot(zobj.cube[:,50:100,50:100].sum(axis=(1,2)), 'b', alpha=0.3)
 
-  # plot a spectrum of the cleaned ZAP2 dataproduct
+  # plot a spectrum of the cleaned ZAP dataproduct
   plt.plot(zobj.cleancube[:,50:100,50:100].sum(axis=(1,2))), 'g')
 
   # choose some number of modes by hand
@@ -163,14 +163,14 @@ A workflow may go as follows:
   plt.figure()
   plt.matshow(zobj.cube[2903,:,:])
 
-  # compare this to the zap2 dataproduct
+  # compare this to the zap dataproduct
   plt.figure()
   plt.matshow(zobj.cleancube[2903,:,:])
 
   # write the processed cube as a single extension FITS
   zobj.writecube('DATACUBE_ZAP.fits')
 
-  # or merge the zap2 datacube into the original input datacube, replacing the
+  # or merge the zap datacube into the original input datacube, replacing the
   # data extension
   zobj.writefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
 
@@ -182,15 +182,15 @@ Changelog
 API
 ===
 
-.. autofunction:: zap2.process
+.. autofunction:: zap.process
 
-.. autofunction:: zap2.SVDoutput
+.. autofunction:: zap.SVDoutput
 
-.. autofunction:: zap2.nancleanfits
+.. autofunction:: zap.nancleanfits
 
-.. autofunction:: zap2.contsubfits
+.. autofunction:: zap.contsubfits
 
-.. autofunction:: zap2.wmedian
+.. autofunction:: zap.wmedian
 
-.. autoclass:: zap2.Zap
+.. autoclass:: zap.Zap
    :members:

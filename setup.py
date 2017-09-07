@@ -33,12 +33,18 @@ if '.dev' in __version__:
         # We modify __version__ here too for commands such as egg_info
         __version__ += commit_number
 
+with open('README.rst') as f:
+    README = f.read()
+
+with open('CHANGELOG') as f:
+    CHANGELOG = f.read()
 
 setup(
     name='zap',
     version=__version__,
     description=__description__,
-    author='Simon Conseil',
+    long_description=README + '\n' + CHANGELOG,
+    author='Kurt Soto, Simon Conseil',
     author_email='simon.conseil@univ-lyon1.fr',
     url='https://github.com/musevlt/zap',
     license='MIT',
@@ -50,4 +56,22 @@ setup(
     entry_points={
         'console_scripts': ['zap = zap.__main__:main']
     },
+    keywords=['astronomy', 'astrophysics', 'science', 'muse', 'vlt',
+              'sky subtraction'],
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: OS Independent',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Topic :: Scientific/Engineering :: Astronomy',
+        'Topic :: Scientific/Engineering :: Physics'
+    ],
 )

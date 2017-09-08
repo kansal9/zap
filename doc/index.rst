@@ -18,9 +18,9 @@ expansion to more instruments.
 
 .. note::
 
-    Version 2.0 (not yet released) is now compatible with the WFM-AO mode, and
-    also brings major improvements for the sky subtraction. Check below the
-    details in the :ref:`changelog` section as well as the dicussion on the
+    Version 2.0 is now compatible with the WFM-AO mode, and also brings major
+    improvements for the sky subtraction. Check below the details in the
+    :ref:`changelog` section as well as the dicussion on the
     :ref:`eigenvectors-number`.
 
 The paper describing the original method can be found here:

@@ -1,10 +1,8 @@
 
-2.0.dev (2017-xx-xx)
---------------------
+2.0 (2017-09-08)
+----------------
 
-Not released yet.
-
-- Compatibility with the AO mode.
+- Compatibility with the WFM-AO mode.
 
 - Use `Scikit-learn`_'s implementation for the PCA instead of the custom one.
   This solved an issue with spatial variations introduced by zap. Also it is

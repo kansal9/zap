@@ -16,6 +16,13 @@ flatfielding of the data in a MUSE exposure, better results are obtained when
 these corrections are made ahead of time. Future development will include
 expansion to more instruments.
 
+.. note::
+
+    Version 2.0 (not yet released) is now compatible with the WFM-AO mode, and
+    also brings major improvements for the sky subtraction. Check below the
+    details in the :ref:`changelog` section as well as the dicussion on the
+    :ref:`eigenvectors-number`.
+
 The paper describing the original method can be found here:
 http://adsabs.harvard.edu/abs/2016MNRAS.458.3210S
 
@@ -95,6 +102,8 @@ An example of running the code in this way is as follows::
 
 The integration time of this frame does not need to be the same as the object
 exposure, but rather just a 2-3 minute exposure.
+
+.. _eigenvectors-number:
 
 Optimal number of eigenvectors
 ------------------------------
@@ -196,6 +205,8 @@ A workflow may go as follows:
   # or merge the zap datacube into the original input datacube, replacing the
   # data extension
   zobj.writefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
+
+.. _changelog:
 
 Changelog
 =========

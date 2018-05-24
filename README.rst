@@ -26,7 +26,7 @@ Links
 
 - `changelog <https://github.com/musevlt/zap/blob/master/CHANGELOG>`_
 
-- `pypi <https://pypi.python.org/pypi/zap>`_
+- `pypi <https://pypi.org/project/zap/>`_
 
 Citation
 ~~~~~~~~

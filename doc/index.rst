@@ -35,9 +35,10 @@ Installation
 
 ZAP requires the following packages:
 
-* Numpy (1.6.0 or later)
-* Astropy (1.0 or later)
-* SciPy (0.13.3 or later)
+* Numpy
+* Astropy
+* SciPy (0.18.1 or later is recommend as a SVD convergence issue was found with
+  an older version)
 * Scikit-learn
 
 Many linear algebra operations are performed in ZAP, so it can be beneficial to

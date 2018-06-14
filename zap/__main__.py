@@ -42,10 +42,16 @@ def main():
            'for the SVD computation')
     addarg('--cfwidthSP', type=int, default=300,
            help='window size for the median or weight continuum filter')
+    addarg('--nevals', help='number of eigenspectra used for each segment')
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.nevals is not None:
+        nevals = [int(x) for x in args.nevals.split(',')]
+    else:
+        nevals = []
 
     try:
         process(
@@ -53,7 +59,7 @@ def main():
             skycubefits=args.skycube, mask=args.mask, zlevel=args.zlevel,
             cfwidthSVD=args.cfwidthSVD, cfwidthSP=args.cfwidthSP,
             cftype=args.cftype, overwrite=args.overwrite, ncpu=args.ncpu,
-            varcurvefits=args.varcurve)
+            varcurvefits=args.varcurve, nevals=nevals)
     except KeyboardInterrupt:
         sys.exit('Interrupted!')
     except Exception as e:

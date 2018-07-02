@@ -1,7 +1,15 @@
-2.1.dev (2017-xx-xx)
+2.1.dev (2018-xx-xx)
 --------------------
 
 Not released yet.
+
+- Compatibility with the NFM-AO mode.
+
+- Add cli parameter for nevals.
+
+- Scipy 0.18.1 or later is recommended, because of SVD convergence issue with
+  previous versions.
+
 
 2.0 (2017-09-08)
 ----------------

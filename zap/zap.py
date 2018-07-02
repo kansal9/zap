@@ -56,7 +56,8 @@ SKYSEG = [0, 10000]
 # range where the NaD notch filters absorbs significant flux
 NOTCH_FILTER_RANGES = {
     'WFM-AO-E': [5755, 6008],
-    'WFM-AO-N': [5805, 5966]
+    'WFM-AO-N': [5805, 5966],
+    'NFM-AO-N': [5780, 6050],
 }
 
 # List of allowed values for cftype (continuum filter)

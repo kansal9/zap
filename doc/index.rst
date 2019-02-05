@@ -2,9 +2,6 @@
 Welcome to ZAP's documentation!
 ================================
 
-.. toctree::
-   :maxdepth: 2
-
 Tired of sky subtraction residuals? ZAP them!
 
 ZAP (the *Zurich Atmosphere Purge*) is a high precision sky subtraction tool
@@ -12,23 +9,29 @@ which can be used as complete sky subtraction solution, or as an enhancement to
 previously sky-subtracted MUSE integral field spectroscopic data.  The method
 uses PCA to isolate the residual sky subtraction features and remove them from
 the observed datacube. Though the operation of ZAP is not dependent on perfect
-flatfielding of the data in a MUSE exposure, better results are obtained when
+flat-fielding of the data in a MUSE exposure, better results are obtained when
 these corrections are made ahead of time. Future development will include
 expansion to more instruments.
 
 .. note::
 
-    Version 2.0 is now compatible with the WFM-AO mode, and also brings major
+    Version 2.0 is compatible with the WFM-AO mode, and also brings major
     improvements for the sky subtraction. Check below the details in the
     :ref:`changelog` section as well as the dicussion on the
     :ref:`eigenvectors-number`.
+
+    Version 2.1 brings compatibility with the NFM-AO mode.
 
 The paper describing the original method can be found here:
 http://adsabs.harvard.edu/abs/2016MNRAS.458.3210S
 
 Please cite ZAP as::
 
-\bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S} Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.\ 2016, \mnras, 458, 3210
+    \bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S}
+        Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.
+        2016, \mnras, 458, 3210
+
+.. contents::
 
 Installation
 ============
@@ -124,6 +127,17 @@ eigenvalues (saved in the FITS headers in ``ZAPNEV*``). It is also possible to
 use the interactive mode (see below) to try different number of eigenvectors.
 This number can be specified manually with the ``neval`` parameter.
 
+Strong values at edges
+----------------------
+
+Because of atmospheric refraction the cube edges are different depending on the
+wavelength, which means that the spectra at the edges contain many NaN values.
+ZAP filters out these spaxels (when the spectra have more than 25% of NaN
+values), because it cannot process incomplete spectra. So these spectra are not
+sky-subtracted and appear with a stronger flux in the output cube or image.
+
+The `zap.mask_nan_edges` function allows to mask these spectra, detecting the
+ones with too many NaNs, and replacing them with NaNs.
 
 Command Line Interface
 ======================
@@ -226,6 +240,8 @@ API
 .. autofunction:: zap.contsubfits
 
 .. autofunction:: zap.wmedian
+
+.. autofunction:: zap.mask_nan_edges
 
 .. autoclass:: zap.Zap
    :members:

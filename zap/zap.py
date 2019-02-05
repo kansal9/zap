@@ -37,10 +37,15 @@ from scipy.stats import sigmaclip
 from sklearn.decomposition import PCA
 from time import time
 
-from .version import __version__
+from pkg_resources import get_distribution, DistributionNotFound
+try:
+    __version__ = get_distribution('zap').version
+except DistributionNotFound:
+    # package is not installed
+    __version__ = None
 
 __all__ = ['process', 'SVDoutput', 'nancleanfits', 'contsubfits', 'Zap',
-           'wmedian', 'SKYSEG']
+           'wmedian', 'SKYSEG', '__version__']
 
 # Limits of the segments in Angstroms. Zap now uses by default only one
 # segment, see below for the old values.

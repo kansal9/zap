@@ -2,9 +2,6 @@
 Welcome to ZAP's documentation!
 ================================
 
-.. toctree::
-   :maxdepth: 2
-
 Tired of sky subtraction residuals? ZAP them!
 
 ZAP (the *Zurich Atmosphere Purge*) is a high precision sky subtraction tool
@@ -12,16 +9,18 @@ which can be used as complete sky subtraction solution, or as an enhancement to
 previously sky-subtracted MUSE integral field spectroscopic data.  The method
 uses PCA to isolate the residual sky subtraction features and remove them from
 the observed datacube. Though the operation of ZAP is not dependent on perfect
-flatfielding of the data in a MUSE exposure, better results are obtained when
+flat-fielding of the data in a MUSE exposure, better results are obtained when
 these corrections are made ahead of time. Future development will include
 expansion to more instruments.
 
 .. note::
 
-    Version 2.0 is now compatible with the WFM-AO mode, and also brings major
+    Version 2.0 is compatible with the WFM-AO mode, and also brings major
     improvements for the sky subtraction. Check below the details in the
     :ref:`changelog` section as well as the dicussion on the
     :ref:`eigenvectors-number`.
+
+    Version 2.1 brings compatibility with the NFM-AO mode.
 
 The paper describing the original method can be found here:
 http://adsabs.harvard.edu/abs/2016MNRAS.458.3210S

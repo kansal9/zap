@@ -28,7 +28,11 @@ http://adsabs.harvard.edu/abs/2016MNRAS.458.3210S
 
 Please cite ZAP as::
 
-\bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S} Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.\ 2016, \mnras, 458, 3210
+    \bibitem[Soto et al.(2016)]{2016MNRAS.458.3210S}
+        Soto, K.~T., Lilly, S.~J., Bacon, R., Richard, J., \& Conseil, S.
+        2016, \mnras, 458, 3210
+
+.. contents::
 
 Installation
 ============
@@ -124,6 +128,17 @@ eigenvalues (saved in the FITS headers in ``ZAPNEV*``). It is also possible to
 use the interactive mode (see below) to try different number of eigenvectors.
 This number can be specified manually with the ``neval`` parameter.
 
+Strong values at edges
+----------------------
+
+Because of atmospheric refraction the cube edges are different depending on the
+wavelength, which means that the spectra at the edges contain many NaN values.
+ZAP filters out these spaxels (when the spectra have more than 25% of NaN
+values), because it cannot process incomplete spectra. So these spectra are not
+sky-subtracted and appear with a stronger flux in the output cube or image.
+
+The `zap.mask_nan_edges` function allows to mask these spectra, detecting the
+ones with too many NaNs, and replacing them with NaNs.
 
 Command Line Interface
 ======================
@@ -226,6 +241,8 @@ API
 .. autofunction:: zap.contsubfits
 
 .. autofunction:: zap.wmedian
+
+.. autofunction:: zap.mask_nan_edges
 
 .. autoclass:: zap.Zap
    :members:

@@ -89,4 +89,4 @@ def mask_nan_edges(cube, outfile=None, plot=False, threshold=50,
                    origin='lower')
         ax3.set_title('Masked pixels')
 
-    return mask, cube
+    return mask, data

@@ -2,7 +2,11 @@
 
 import os
 import subprocess
+import sys
 from setuptools import setup, find_packages
+
+if sys.version_info[:2] < (3, 5):
+    sys.exit('ZAP supports Python 3.5+ only')
 
 # Read version.py
 __version__ = None
@@ -48,10 +52,11 @@ setup(
     author_email='simon.conseil@univ-lyon1.fr',
     url='https://github.com/musevlt/zap',
     license='MIT',
+    python_requires='>=3.5',
     packages=find_packages(),
     include_package_data=True,
     zip_safe=False,
-    install_requires=['numpy', 'scipy', 'astropy', 'scikit-learn'],
+    install_requires=['numpy', 'scipy', 'astropy>=2.0', 'scikit-learn'],
     extras_require={'plot': ['matplotlib']},
     entry_points={
         'console_scripts': ['zap = zap.__main__:main']

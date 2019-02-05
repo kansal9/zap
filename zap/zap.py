@@ -1,7 +1,7 @@
 # ZAP - Zurich Atmosphere Purge
 #
 # Copyright (c) 2014-2016 Kurt Soto
-# Copyright (c) 2015-2017 Simon Conseil
+# Copyright (c) 2015-2019 Simon Conseil
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -22,8 +22,6 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-from __future__ import absolute_import, division, print_function
-
 import astropy.units as u
 import logging
 import numpy as np
@@ -32,7 +30,6 @@ import scipy.ndimage as ndi
 import sys
 
 from astropy.io import fits
-from astropy.utils import minversion
 from astropy.wcs import WCS
 from functools import wraps
 from multiprocessing import cpu_count, Manager, Process
@@ -65,16 +62,6 @@ CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
 
 # Number of available CPUs
 NCPU = cpu_count()
-
-PY2 = sys.version_info[0] == 2
-ASTROPY_LT_1_3 = not minversion('astropy', '1.3')
-
-if not PY2:
-    text_type = str
-    string_types = (str,)
-else:
-    text_type = unicode
-    string_types = (str, unicode)
 
 logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO,
                     stream=sys.stdout)
@@ -152,7 +139,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     """
     logger.info('Running ZAP %s !', __version__)
     t0 = time()
-    if not isinstance(musecubefits, string_types):
+    if not isinstance(musecubefits, str):
         raise TypeError('The process method only accepts a single datacube '
                         'filename.')
 
@@ -256,7 +243,7 @@ def contsubfits(cubefits, outfits='CONTSUB_CUBE.fits', ncpu=None,
 
     outhead = _newheader(zobj)
     outhdu = fits.PrimaryHDU(data=cube, header=outhead)
-    write_hdulist_to(outhdu, outfits, overwrite=overwrite)
+    outhdu.writeto(outfits, overwrite=overwrite)
     logger.info('Continuum cube file saved to %s', outfits)
 
 
@@ -282,7 +269,7 @@ def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
     with fits.open(musecubefits) as hdu:
         hdu[1].data = _nanclean(hdu[1].data, rejectratio=rejectratio,
                                 boxsz=boxsz)[0]
-        write_hdulist_to(hdu, outfn, overwrite=overwrite)
+        hdu.writeto(outfn, overwrite=overwrite)
 
 
 def timeit(func):
@@ -786,7 +773,7 @@ class Zap(object):
         """Write the processed datacube to an individual fits file."""
         outhead = _newheader(self)
         outhdu = fits.PrimaryHDU(data=self.cleancube, header=outhead)
-        write_hdulist_to(outhdu, outcubefits, overwrite=overwrite)
+        outhdu.writeto(outcubefits, overwrite=overwrite)
         logger.info('Cube file saved to %s', outcubefits)
 
     def writeskycube(self, skycubefits='SKYCUBE_ZAP.fits', overwrite=False):
@@ -794,7 +781,7 @@ class Zap(object):
         outcube = self.cube - self.cleancube
         outhead = _newheader(self)
         outhdu = fits.PrimaryHDU(data=outcube, header=outhead)
-        write_hdulist_to(outhdu, skycubefits, overwrite=overwrite)
+        outhdu.writeto(skycubefits, overwrite=overwrite)
         logger.info('Sky cube file saved to %s', skycubefits)
 
     def writevarcurve(self, varcurvefits='VARCURVE_ZAP.fits', overwrite=False):
@@ -803,7 +790,7 @@ class Zap(object):
         table = Table([m.explained_variance_ for m in self.models])
         hdu = fits.table_to_hdu(table)
         _newheader(self, hdu.header)
-        write_hdulist_to(hdu, varcurvefits, overwrite=overwrite)
+        hdu.writeto(varcurvefits, overwrite=overwrite)
         logger.info('Variance curve file saved to %s', varcurvefits)
 
     def mergefits(self, outcubefits, overwrite=False):
@@ -813,7 +800,7 @@ class Zap(object):
         with fits.open(self.musecubefits) as hdu:
             hdu[1].header = _newheader(self)
             hdu[1].data = self.cleancube
-            write_hdulist_to(hdu, outcubefits, overwrite=overwrite)
+            hdu.writeto(outcubefits, overwrite=overwrite)
         logger.info('Cube file saved to %s', outcubefits)
 
     def plotvarcurve(self, i=0, ax=None):
@@ -855,15 +842,6 @@ class Zap(object):
 
 
 # ================= Helper Functions =================
-
-if ASTROPY_LT_1_3:
-    # the 'clobber' parameter was renamed to 'overwrite' in 1.3
-    def write_hdulist_to(hdulist, fileobj, overwrite=False, **kwargs):
-        hdulist.writeto(fileobj, clobber=overwrite, **kwargs)
-else:
-    def write_hdulist_to(hdulist, fileobj, overwrite=False, **kwargs):
-        hdulist.writeto(fileobj, overwrite=overwrite, **kwargs)
-
 
 def worker(f, i, chunk, out_q, err_q, kwargs):
     try:

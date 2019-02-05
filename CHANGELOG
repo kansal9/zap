@@ -3,6 +3,8 @@
 
 Not released yet.
 
+- Zap now requires Python 3.5 or later, and Astropy 2.0 or later.
+
 - Compatibility with the NFM-AO mode.
 
 - Add a command-line argument for nevals.

@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 # ================= Top Level Functions =================
 
-def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
+def process(cubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
             zlevel='median', cftype='weight', cfwidthSVD=300, cfwidthSP=300,
             nevals=[], extSVD=None, skycubefits=None, mask=None,
             interactive=False, ncpu=None, pca_class=None, n_components=None,
@@ -87,7 +87,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
 
     Parameters
     ----------
-    musecubefits : str
+    cubefits : str
         Input FITS file, containing a cube with data in the first extension.
     outcubefits : str
         Output FITS file, based on the input one to propagate all header
@@ -144,7 +144,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     """
     logger.info('Running ZAP %s !', __version__)
     t0 = time()
-    if not isinstance(musecubefits, str):
+    if not isinstance(cubefits, str):
         raise TypeError('The process method only accepts a single datacube '
                         'filename.')
 
@@ -170,10 +170,10 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
         # cfwidth values differ and extSVD is not given. Otherwise, the SVD
         # will be computed in the _run method, which allows to avoid running
         # twice the zlevel and continuumfilter steps.
-        extSVD = SVDoutput(musecubefits, clean=clean, zlevel=zlevel,
+        extSVD = SVDoutput(cubefits, clean=clean, zlevel=zlevel,
                            cftype=cftype, cfwidth=cfwidthSVD, mask=mask)
 
-    zobj = Zap(musecubefits, pca_class=pca_class, n_components=n_components)
+    zobj = Zap(cubefits, pca_class=pca_class, n_components=n_components)
     zobj._run(clean=clean, zlevel=zlevel, cfwidth=cfwidthSP, cftype=cftype,
               nevals=nevals, extSVD=extSVD)
 
@@ -191,7 +191,7 @@ def process(musecubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     logger.info('Zapped! (took %.2f sec.)', time() - t0)
 
 
-def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
+def SVDoutput(cubefits, clean=True, zlevel='median', cftype='weight',
               cfwidth=300, mask=None, ncpu=None, pca_class=None,
               n_components=None):
     """Performs the SVD decomposition of a datacube.
@@ -202,7 +202,7 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
 
     Parameters
     ----------
-    musecubefits : str
+    cubefits : str
         Input FITS file, containing a cube with data in the first extension.
     clean : bool
         If True (default value), the NaN values are cleaned. Spaxels with more
@@ -220,13 +220,13 @@ def SVDoutput(musecubefits, clean=True, zlevel='median', cftype='weight',
         Path of a FITS file containing a mask (1 for objects, 0 for sky).
 
     """
-    logger.info('Processing %s to compute the SVD', musecubefits)
+    logger.info('Processing %s to compute the SVD', cubefits)
 
     if ncpu is not None:
         global NCPU
         NCPU = ncpu
 
-    zobj = Zap(musecubefits, pca_class=pca_class, n_components=n_components)
+    zobj = Zap(cubefits, pca_class=pca_class, n_components=n_components)
     zobj._prepare(clean=clean, zlevel=zlevel, cftype=cftype,
                   cfwidth=cfwidth, mask=mask)
     zobj._msvd()
@@ -252,13 +252,13 @@ def contsubfits(cubefits, outfits='CONTSUB_CUBE.fits', ncpu=None,
     logger.info('Continuum cube file saved to %s', outfits)
 
 
-def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
+def nancleanfits(cubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
                  boxsz=1, overwrite=False):
     """Interpolates NaN values from the nearest neighbors.
 
     Parameters
     ----------
-    musecubefits : str
+    cubefits : str
         Input FITS file, containing a cube with data in the first extension.
     outfn : str
         Output FITS file. Default to ``NANCLEAN_CUBE.fits``.
@@ -271,7 +271,7 @@ def nancleanfits(musecubefits, outfn='NANCLEAN_CUBE.fits', rejectratio=0.25,
         is a 3x3x3 cube.
 
     """
-    with fits.open(musecubefits) as hdu:
+    with fits.open(cubefits) as hdu:
         hdu[1].data = _nanclean(hdu[1].data, rejectratio=rejectratio,
                                 boxsz=boxsz)[0]
         hdu.writeto(outfn, overwrite=overwrite)
@@ -339,12 +339,21 @@ class Zap(object):
 
     """
 
-    def __init__(self, musecubefits, pca_class=None, n_components=None):
-        self.musecubefits = musecubefits
-        with fits.open(musecubefits) as hdul:
-            self.ins_mode = hdul[0].header.get('HIERARCH ESO INS MODE')
-            self.cube = hdul[1].data
-            self.header = hdul[1].header
+    def __init__(self, cubefits, pca_class=None, n_components=None):
+        self.cubefits = cubefits
+        self.ins_mode = None
+
+        with fits.open(cubefits) as hdul:
+            self.instrument = hdul[0].header.get('INSTRUME')
+            if self.instrument == 'MUSE':
+                self.ins_mode = hdul[0].header.get('HIERARCH ESO INS MODE')
+                self.cube = hdul[1].data
+                self.header = hdul[1].header
+            elif self.instrument == 'KCWI':
+                self.cube = hdul[0].data
+                self.header = hdul[0].header
+            else:
+                raise ValueError('unsupported instrument %s' % self.instrument)
 
         # Workaround for floating points errors in wcs computation: if cunit is
         # specified, wcslib will convert in meters instead of angstroms, so we
@@ -802,9 +811,16 @@ class Zap(object):
         """Merge the ZAP cube into the full muse datacube and write."""
         # make sure it has the right extension
         outcubefits = outcubefits.split('.fits')[0] + '.fits'
-        with fits.open(self.musecubefits) as hdu:
-            hdu[1].header = _newheader(self)
-            hdu[1].data = self.cleancube
+        with fits.open(self.cubefits) as hdu:
+            if self.instrument == 'MUSE':
+                hdu[1].header = _newheader(self)
+                hdu[1].data = self.cleancube
+            elif self.instrument == 'KCWI':
+                hdu[0].header = _newheader(self)
+                hdu[0].data = self.cleancube
+            else:
+                raise ValueError('unsupported instrument %s' % self.instrument)
+
             hdu.writeto(outcubefits, overwrite=overwrite)
         logger.info('Cube file saved to %s', outcubefits)
 

@@ -5,14 +5,16 @@ Not released yet.
 
 - Zap now requires Python 3.5 or later, and Astropy 2.0 or later.
 
-- Compatibility with the NFM-AO mode.
+- Compatibility with the NFM-AO mode, the notch filter region is ignored.
 
-- Add a command-line argument for nevals.
+- Add a command-line argument for ``nevals``.
 
-- Scipy 0.18.1 or later is recommended, because of SVD convergence issue with
+- Scipy 0.18.1 or later is required, because of SVD convergence issue with
   previous versions.
 
-- Add a function to mask the cube edges.
+- Add a function to mask the cube edges (``zap.mask_nan_edges``): the spaxels
+  at the edges of the cube may have a lot of NaNs in their spectra, so ZAP
+  does not subtract the sky on these which leaves high residuals.
 
 
 2.0 (2017-09-08)

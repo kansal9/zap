@@ -28,6 +28,7 @@ import numpy as np
 import os
 import scipy.ndimage as ndi
 import sys
+import warnings
 
 from astropy.io import fits
 from astropy.wcs import WCS
@@ -612,6 +613,11 @@ class Zap(object):
         if cftype == 'none':
             self.normstack = self.stack.copy()
         else:
+            if cftype == 'fit' and self.instrument != 'MUSE':
+                warnings.warn('the continuum fit method is currently adapted '
+                              'to MUSE and should not be used for other '
+                              'instruments', UserWarning)
+
             self.contarray = _continuumfilter(self.stack, cftype,
                                               weight=weight, cfwidth=cfwidth)
             self.normstack = self.stack - self.contarray

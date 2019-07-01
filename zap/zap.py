@@ -378,6 +378,8 @@ class Zap(object):
                 NOTCH_FILTER_RANGES[self.ins_mode], 0)[0].astype(int)
             lmin, lmax = self.notch_limits
             self.cube[lmin:lmax + 1] = 0.0
+        else:
+            self.notch_limits = None
 
         # NaN Cleaning
         self.run_clean = False
@@ -619,7 +621,8 @@ class Zap(object):
                               'instruments', UserWarning)
 
             self.contarray = _continuumfilter(self.stack, cftype,
-                                              weight=weight, cfwidth=cfwidth)
+                                              weight=weight, cfwidth=cfwidth,
+                                              notch_limits=self.notch_limits)
             self.normstack = self.stack - self.contarray
 
     def _normalize_variance(self):
@@ -934,7 +937,8 @@ def _compute_deriv(arr, nsigma=5):
     return deriv, mn1, std1
 
 
-def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
+def _continuumfilter(stack, cftype, weight=None, cfwidth=300,
+                     notch_limits=None):
     if cftype == 'fit':
         x = np.arange(stack.shape[0])
         # Excluding the very red part for the fit. This is Muse-specific,
@@ -949,9 +953,25 @@ def _continuumfilter(stack, cftype, weight=None, cfwidth=300):
         weight = None
     elif cftype == 'weight':
         func = _icfweight
+
     logger.info('Using cfwidth=%d', cfwidth)
-    c = parallel_map(func, stack, NCPU, axis=1, weight=weight, cfwidth=cfwidth)
-    return np.concatenate(c, axis=1)
+
+    if notch_limits is not None:
+        # To manage the notch filter which is filled with zeros, we process the
+        # stack in two halves, before and after the filter.
+        c = np.zeros_like(stack)
+        ctmp = parallel_map(func, stack[:notch_limits[0]], NCPU, axis=1,
+                            weight=weight, cfwidth=cfwidth)
+        c[:notch_limits[0]] = np.concatenate(ctmp, axis=1)
+        ctmp = parallel_map(func, stack[notch_limits[1]:], NCPU, axis=1,
+                            weight=weight, cfwidth=cfwidth)
+        c[notch_limits[1]:] = np.concatenate(ctmp, axis=1)
+    else:
+        c = parallel_map(func, stack, NCPU, axis=1, weight=weight,
+                         cfwidth=cfwidth)
+        c = np.concatenate(c, axis=1)
+
+    return c
 
 
 def _icfweight(i, stack, weight=None, cfwidth=None):

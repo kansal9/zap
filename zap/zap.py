@@ -941,10 +941,19 @@ def _continuumfilter(stack, cftype, weight=None, cfwidth=300,
                      notch_limits=None):
     if cftype == 'fit':
         x = np.arange(stack.shape[0])
+
         # Excluding the very red part for the fit. This is Muse-specific,
         # but anyway for another instrument this method should probably
         # not be used as is.
-        res = np.polynomial.polynomial.polyfit(x[:3600], stack[:3600], deg=5)
+        w = np.ones(stack.shape[0])
+        w[3600:] = 0
+
+        if notch_limits is not None:
+            # Exclude the notch filter region
+            lmin, lmax = notch_limits
+            w[lmin:lmax + 1] = 0
+
+        res = np.polynomial.polynomial.polyfit(x, stack, deg=5, w=w)
         ret = np.polynomial.polynomial.polyval(x, res, tensor=True)
         return ret.T
 

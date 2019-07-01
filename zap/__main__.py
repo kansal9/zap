@@ -33,7 +33,7 @@ def main():
     addarg('--zlevel', default='median',
            help='method for the zeroth order sky removal: none, sigclip or '
            'median')
-    addarg('--cftype', default='weight',
+    addarg('--cftype', default='median',
            help='method for the continuum filter: {}. For the '
            'weight method, a zeroth order sky is required (see zlevel)'
            .format(', '.join(CFTYPE_OPTIONS)))

@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 # ================= Top Level Functions =================
 
 def process(cubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
-            zlevel='median', cftype='weight', cfwidthSVD=300, cfwidthSP=300,
+            zlevel='median', cftype='median', cfwidthSVD=300, cfwidthSP=300,
             nevals=[], extSVD=None, skycubefits=None, mask=None,
             interactive=False, ncpu=None, pca_class=None, n_components=None,
             overwrite=False, varcurvefits=None):
@@ -192,7 +192,7 @@ def process(cubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     logger.info('Zapped! (took %.2f sec.)', time() - t0)
 
 
-def SVDoutput(cubefits, clean=True, zlevel='median', cftype='weight',
+def SVDoutput(cubefits, clean=True, zlevel='median', cftype='median',
               cfwidth=300, mask=None, ncpu=None, pca_class=None,
               n_components=None):
     """Performs the SVD decomposition of a datacube.
@@ -438,7 +438,7 @@ class Zap(object):
         self.cleancube = None
 
     @timeit
-    def _prepare(self, clean=True, zlevel='median', cftype='weight',
+    def _prepare(self, clean=True, zlevel='median', cftype='median',
                  cfwidth=300, extzlevel=None, mask=None):
         # Check for consistency between weighted median and zlevel keywords
         if cftype == 'weight' and zlevel == 'none':
@@ -468,7 +468,7 @@ class Zap(object):
         # normalize the variance in the segments.
         self._normalize_variance()
 
-    def _run(self, clean=True, zlevel='median', cftype='weight',
+    def _run(self, clean=True, zlevel='median', cftype='median',
              cfwidth=300, nevals=[], extSVD=None):
         """ Perform all steps to ZAP a datacube:
 
@@ -586,7 +586,7 @@ class Zap(object):
         self.stack -= self.zlsky[:, np.newaxis]
 
     @timeit
-    def _continuumfilter(self, cfwidth=300, cftype='weight'):
+    def _continuumfilter(self, cfwidth=300, cftype='median'):
         """A multiprocessed implementation of the continuum removal.
 
         This process distributes the data to many processes that then

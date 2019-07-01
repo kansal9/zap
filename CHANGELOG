@@ -5,7 +5,15 @@ Not released yet.
 
 - Zap now requires Python 3.5 or later, and Astropy 2.0 or later.
 
-- Compatibility with the NFM-AO mode, the notch filter region is ignored.
+- Compatibility with the NFM-AO mode.
+
+- Ignore the notch filter region in the 'median' and 'fit' methods for the
+  continuum filter (``cftype``).
+
+- Change the default continuum filter method (``cftype``) to 'median'. The
+  previous default method ('weight') has some problems with the treatment of
+  spectra edges and with the notch filter edges for the AO modes, and is also
+  introducing bumps in the red wavelengths.
 
 - Add a command-line argument for ``nevals``.
 

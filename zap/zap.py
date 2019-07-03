@@ -875,8 +875,7 @@ def worker(f, i, chunk, out_q, err_q, kwargs):
 
 
 def parallel_map(func, arr, indices, **kwargs):
-    logger.debug('Running function %s with indices: %s',
-                 func.__name__, indices)
+    logger.debug('Running function %s with %s chunks', func.__name__, indices)
     axis = kwargs.pop('axis', None)
     if isinstance(indices, (int, np.integer)) and indices == 1:
         return [func(0, arr, **kwargs)]

@@ -239,8 +239,6 @@ API
 
 .. autofunction:: zap.contsubfits
 
-.. autofunction:: zap.wmedian
-
 .. autofunction:: zap.mask_nan_edges
 
 .. autoclass:: zap.Zap

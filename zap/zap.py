@@ -46,7 +46,7 @@ except DistributionNotFound:
     __version__ = None
 
 __all__ = ['process', 'SVDoutput', 'nancleanfits', 'contsubfits', 'Zap',
-           'wmedian', 'SKYSEG', '__version__']
+           'SKYSEG', '__version__']
 
 # Limits of the segments in Angstroms. Zap now uses by default only one
 # segment, see below for the old values.
@@ -64,7 +64,7 @@ NOTCH_FILTER_RANGES = {
 }
 
 # List of allowed values for cftype (continuum filter)
-CFTYPE_OPTIONS = ('weight', 'median', 'fit', 'none')
+CFTYPE_OPTIONS = ('median', 'fit', 'none')
 
 # Number of available CPUs
 NCPU = cpu_count()
@@ -102,9 +102,8 @@ def process(cubefits, outcubefits='DATACUBE_ZAP.fits', clean=True,
     zlevel : str
         Method for the zeroth order sky removal: `none`, `sigclip` or `median`
         (default).
-    cftype : {'weight', 'median', 'fit', 'none'}
-        Method for the continuum filter. For the `weight` method, a zeroth
-        order sky is required (see `zlevel`).
+    cftype : {'median', 'fit', 'none'}
+        Method for the continuum filter.
     cfwidthSVD : int or float
         Window size for the continuum filter, for the SVD computation.
         Default to 300.
@@ -212,9 +211,8 @@ def SVDoutput(cubefits, clean=True, zlevel='median', cftype='median',
     zlevel : str
         Method for the zeroth order sky removal: `none`, `sigclip` or `median`
         (default).
-    cftype : {'weight', 'median', 'fit', 'none'}
-        Method for the continuum filter. For the `weight` method, a zeroth
-        order sky is required (see `zlevel`).
+    cftype : {'median', 'fit', 'none'}
+        Method for the continuum filter.
     cfwidth : int or float
         Window size for the continuum filter, default to 300.
     mask : str
@@ -440,10 +438,6 @@ class Zap(object):
     @timeit
     def _prepare(self, clean=True, zlevel='median', cftype='median',
                  cfwidth=300, extzlevel=None, mask=None):
-        # Check for consistency between weighted median and zlevel keywords
-        if cftype == 'weight' and zlevel == 'none':
-            raise ValueError('Weighted median requires a zlevel calculation')
-
         # clean up the nan values
         if clean:
             self._nanclean()
@@ -601,15 +595,11 @@ class Zap(object):
 
         """
         if cftype not in CFTYPE_OPTIONS:
-            raise ValueError("cftype must be weight, median, fit or none, "
-                             "got {}".format(cftype))
+            raise ValueError("cftype must be median, fit or none, got {}"
+                             .format(cftype))
         logger.info('Applying Continuum Filter, cftype=%s', cftype)
         self._cftype = cftype
         self._cfwidth = cfwidth
-
-        weight = None
-        if cftype == 'weight':
-            weight = np.abs(self.zlsky - (np.max(self.zlsky) + 1))
 
         # remove continuum features
         if cftype == 'none':
@@ -621,7 +611,7 @@ class Zap(object):
                               'instruments', UserWarning)
 
             self.contarray = _continuumfilter(self.stack, cftype,
-                                              weight=weight, cfwidth=cfwidth,
+                                              cfwidth=cfwidth,
                                               notch_limits=self.notch_limits)
             self.normstack = self.stack - self.contarray
 
@@ -937,8 +927,7 @@ def _compute_deriv(arr, nsigma=5):
     return deriv, mn1, std1
 
 
-def _continuumfilter(stack, cftype, weight=None, cfwidth=300,
-                     notch_limits=None):
+def _continuumfilter(stack, cftype, cfwidth=300, notch_limits=None):
     if cftype == 'fit':
         x = np.arange(stack.shape[0])
 
@@ -959,9 +948,8 @@ def _continuumfilter(stack, cftype, weight=None, cfwidth=300,
 
     if cftype == 'median':
         func = _icfmedian
-        weight = None
-    elif cftype == 'weight':
-        func = _icfweight
+    else:
+        raise ValueError('unknown cftype option')
 
     logger.info('Using cfwidth=%d', cfwidth)
 
@@ -970,25 +958,19 @@ def _continuumfilter(stack, cftype, weight=None, cfwidth=300,
         # stack in two halves, before and after the filter.
         c = np.zeros_like(stack)
         ctmp = parallel_map(func, stack[:notch_limits[0]], NCPU, axis=1,
-                            weight=weight, cfwidth=cfwidth)
+                            cfwidth=cfwidth)
         c[:notch_limits[0]] = np.concatenate(ctmp, axis=1)
         ctmp = parallel_map(func, stack[notch_limits[1]:], NCPU, axis=1,
-                            weight=weight, cfwidth=cfwidth)
+                            cfwidth=cfwidth)
         c[notch_limits[1]:] = np.concatenate(ctmp, axis=1)
     else:
-        c = parallel_map(func, stack, NCPU, axis=1, weight=weight,
-                         cfwidth=cfwidth)
+        c = parallel_map(func, stack, NCPU, axis=1, cfwidth=cfwidth)
         c = np.concatenate(c, axis=1)
 
     return c
 
 
-def _icfweight(i, stack, weight=None, cfwidth=None):
-    return np.array([wmedian(row, weight, cfwidth=cfwidth)
-                     for row in stack.T]).T
-
-
-def _icfmedian(i, stack, weight=None, cfwidth=None):
+def _icfmedian(i, stack, cfwidth=None):
     ufilt = 3  # set this to help with extreme over/under corrections
     return ndi.median_filter(
         ndi.uniform_filter(stack, (ufilt, 1)), (cfwidth, 1))
@@ -998,61 +980,6 @@ def rolling_window(a, window):  # function for striding to help speed up
     shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
     strides = a.strides + (a.strides[-1],)
     return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
-
-
-def wmedian(spec, wt, cfwidth=300):
-    """Performs a weighted median filtering of a 1d spectrum.
-
-    Operates using a cumulative sum curve.
-
-    Parameters
-    ----------
-    spec : numpy.ndarray
-        Input 1d spectrum to be filtered
-    wt : numpy.ndarray
-        A spectrum of equal length as the input array to provide the weights.
-    cfwidth : int or float
-        Window size for the continuum filter, for the SVD computation.
-        Default to 300.
-
-    """
-    # ignore the warning (feature not a bug)
-    old_settings = np.seterr(divide='ignore')
-    spec = np.pad(spec, (cfwidth, cfwidth), 'constant', constant_values=0)
-    wt = np.abs(wt)
-    wt = np.pad(wt, (cfwidth, cfwidth), 'constant',
-                constant_values=(np.min(wt) / 1000., np.min(wt) / 1000.))
-
-    # do some striding for speed
-    swin = rolling_window(spec, cfwidth)  # create window container array
-    wwin = rolling_window(wt, cfwidth)  # create window container array
-
-    # sort based on data
-    srt = np.argsort(swin, axis=-1)
-    ind = np.ogrid[0:swin.shape[0], 0:swin.shape[1]]
-    sdata = swin[ind[0], srt]
-    swt = wwin[ind[0], srt]
-
-    # calculate accumulated weights
-    awt = np.cumsum(swt, axis=-1)
-
-    # new weightsort for normalization and consideration of data
-    nw = (awt - 0.5 * swt) / awt[:, -1][:, np.newaxis]
-
-    # find the midpoint in the new weight sort
-    s = np.argmin(np.abs(nw - 0.5), axis=-1)
-    sl = np.arange(len(s))
-    nws = nw[sl, s]
-    nws1 = nw[sl, s - 1]
-
-    f1 = (nws - 0.5) / (nws - nws1)
-    f2 = (0.5 - nws1) / (nws - nws1)
-    wmed = sdata[sl, s - 1] * f1 + sdata[sl, s] * f2
-    width = cfwidth // 2
-    wmed = wmed[width:-width - 1]
-    np.seterr(old_settings['divide'])
-
-    return wmed
 
 
 def _newheader(zobj, header=None):

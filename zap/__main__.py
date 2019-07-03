@@ -34,14 +34,13 @@ def main():
            help='method for the zeroth order sky removal: none, sigclip or '
            'median')
     addarg('--cftype', default='median',
-           help='method for the continuum filter: {}. For the '
-           'weight method, a zeroth order sky is required (see zlevel)'
+           help='method for the continuum filter: {}'
            .format(', '.join(CFTYPE_OPTIONS)))
     addarg('--cfwidthSVD', type=int, default=300,
-           help='window size for the median or weight continuum filter, '
+           help='window size for the median continuum filter, '
            'for the SVD computation')
     addarg('--cfwidthSP', type=int, default=300,
-           help='window size for the median or weight continuum filter')
+           help='window size for the median continuum filter')
     addarg('--nevals', help='number of eigenspectra used for each segment')
     args = parser.parse_args()
 

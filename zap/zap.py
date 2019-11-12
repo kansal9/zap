@@ -49,8 +49,9 @@ __all__ = ['process', 'SVDoutput', 'nancleanfits', 'contsubfits', 'Zap',
            'SKYSEG', '__version__']
 
 # Limits of the segments in Angstroms. Zap now uses by default only one
-# segment, see below for the old values.
-SKYSEG = [0, 10000]
+# segment, based on the cube wavelength's min and max.  See below for the
+# old values.
+SKYSEG = []
 
 # These are the old limits from the original zap. Keeping them for reference,
 # and may be useful for further testing.

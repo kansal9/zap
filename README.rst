@@ -6,8 +6,8 @@ Tired of sky subtraction residuals? ZAP them!
 ZAP is a high precision sky subtraction tool which can be used as complete sky
 subtraction solution, or as an enhancement to previously sky-subtracted MUSE
 data.  The method uses PCA to isolate the residual sky subtraction features and
-remove them from the observed datacube. Future developments will include
-modification for use on a variety of instruments.
+remove them from the observed datacube. ZAP was designed for MUSE data and has
+been used sucessfully on KCWI and Subaru/FOCAS data.
 
 The last stable release of ZAP can be installed simply with pip::
 

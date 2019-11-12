@@ -1,3 +1,8 @@
+2.2.dev (2019-xx-xx)
+--------------------
+
+- Add support for Subaru/FOCAS.
+
 2.1 (2019-07-03)
 ----------------
 
@@ -22,6 +27,7 @@
   at the edges of the cube may have a lot of NaNs in their spectra, so ZAP
   does not subtract the sky on these which leaves high residuals.
 
+- Add support for KCWI.
 
 2.0 (2017-09-08)
 ----------------

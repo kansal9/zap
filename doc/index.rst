@@ -219,7 +219,7 @@ A workflow may go as follows:
 
   # or merge the zap datacube into the original input datacube, replacing the
   # data extension
-  zobj.writefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
+  zobj.mergefits(outcubefits='DATACUBE_FINAL_ZAP.fits')
 
 .. _changelog:
 

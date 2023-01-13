@@ -355,6 +355,13 @@ class Zap(object):
             elif self.instrument == 'FOCAS':
                 self.cube = hdul[0].data
                 self.header = hdul[0].header
+            elif self.instrument == 'WIFES':
+                try:
+                    self.cube = hdul['WIFES REDUCED DATA'].data
+                except KeyError:
+                    self.cube = hdul[0].data
+                self.header = hdul[0].header
+                self.header['CUNIT3'] = 'Angstrom'
             else:
                 raise ValueError('unsupported instrument %s' % self.instrument)
 
@@ -822,6 +829,9 @@ class Zap(object):
                 hdu[0].header = _newheader(self)
                 hdu[0].data = self.cleancube
             elif self.instrument == 'FOCAS':
+                hdu[0].header = _newheader(self)
+                hdu[0].data = self.cleancube
+            elif self.instrument == 'WIFES':
                 hdu[0].header = _newheader(self)
                 hdu[0].data = self.cleancube
             else:
